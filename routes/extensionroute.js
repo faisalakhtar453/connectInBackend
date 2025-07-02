@@ -337,7 +337,7 @@ router.post('/loginDetail', async (req, res) => {
 
         await User.findOneAndUpdate(
             { _id: userid },
-            { cookie: JSON.stringify({ email, password }), cookieStatus: true, extensionStatus: true },
+            { cookieStatus: true, extensionStatus: true },
             { new: true, upsert: true }
         );
 
@@ -408,7 +408,7 @@ router.post('/loginDetail', async (req, res) => {
 
         const Linkacc = await LinkedAccount.findOneAndUpdate(
             { userid: userid, url: profileData?.profileLink },
-            { name: profileData?.name, imageUrl: profileData?.imageUrl, tagLine: profileData?.tagLine, pageData, status: 'active' },
+            { name: profileData?.name, imageUrl: profileData?.imageUrl, tagLine: profileData?.tagLine, pageData, status: 'active', cookie: JSON.stringify({ email, password }) },
             { upsert: true, new: true, setDefaultsOnInsert: true }
         );
 

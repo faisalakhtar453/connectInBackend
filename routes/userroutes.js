@@ -273,29 +273,6 @@ router.post("/verifyToken", async (req, res) => {
   }
 });
 
-// router.post("/getCommentSetting", async (req, res) => {
-//   const postData = req.body;
-//   const userid = CleanHTMLData(CleanDBData(postData.userid));
-
-//   try {
-//     const authUser = await checkAuthorization(req, res);
-//     if (authUser) {
-//       const data = await CommentSetting.findOne({ userid: authUser });
-
-//       res.json({
-//         status: "success",
-//         data: data,
-//       });
-//     }
-//   } catch (error) {
-//     console.error("Error during registration:", error);
-//     res.json({
-//       status: "error",
-//       message: "Server error occurred during registration.",
-//     });
-//   }
-// });
-
 router.post("/getPlans", async (req, res) => {
   const postData = req.body;
   const userid = CleanHTMLData(CleanDBData(postData.userid));
@@ -364,35 +341,6 @@ router.post("/updatePlan", async (req, res) => {
     });
   }
 });
-
-// router.post("/updateCommentSetting", async (req, res) => {
-//   const postData = req.body;
-//   // const userid = CleanHTMLData(CleanDBData(postData.userid));
-//   const key = CleanHTMLData(CleanDBData(postData.key));
-//   const value = CleanHTMLData(CleanDBData(postData.value));
-
-//   try {
-//     const authUser = await checkAuthorization(req, res);
-//     if (authUser) {
-//       const userSettings = await CommentSetting.findOne({ userid: authUser });
-
-//       userSettings[key] = value;
-//       await userSettings.save();
-
-//       res.json({
-//         status: "success",
-//         message: `${key.charAt(0).toUpperCase() + key.slice(1)} is turned ${value === "true" ? "on" : "off"
-//           }`,
-//       });
-//     }
-//   } catch (error) {
-//     console.error("Error during registration:", error);
-//     res.json({
-//       status: "error",
-//       message: "Something want wrong",
-//     });
-//   }
-// });
 
 router.post("/userCommentDetail", async (req, res) => {
   const postData = req.body;
@@ -463,7 +411,7 @@ let browser, page;
 
 async function launchBrowser() {
   browser = await puppeteer.launch({
-    headless: false,
+    headless: "new",
     args: ["--start-maximized", "--no-sandbox", "--disable-setuid-sandbox"],
     defaultViewport: null,
     userDataDir: "./tmp/puppeteer-sessions/linkedin-profile-admin", // Persist session
@@ -493,32 +441,59 @@ async function launchBrowser() {
   }
   console.log("✅ All LinkedIn cookies deleted.");
 
-  const login = await Setting.findOne({ name: "login" });
+  // const login = await Setting.findOne({ name: "login" });
+  const freshLogins = await Setting.find({ name: "login", status: "fresh" });
 
-  const email = login?.value?.email || "";
-  const password = login?.value?.password || "";
 
-  // Go to login page
-  await page.goto("https://www.linkedin.com/login", { waitUntil: 'domcontentloaded' });
+  for (let login of freshLogins) {
+    const { email, password } = login.value;
 
-  await page.waitForSelector('input[name="session_key"]', { timeout: 10000 });
-  await page.waitForSelector('input[name="session_password"]', { timeout: 10000 });
+    await page.goto("https://www.linkedin.com/login", { waitUntil: 'domcontentloaded' });
 
-  await page.type('input[name="session_key"]', email, { delay: 100 });
-  await page.type('input[name="session_password"]', password, { delay: 100 });
+    await page.type('input[name="session_key"]', email, { delay: 100 });
+    await page.type('input[name="session_password"]', password, { delay: 100 });
+    await page.click('button[type="submit"]');
 
-  // await Promise.all([
-  //   page.click('button[type="submit"]'),
-  //   page.waitForNavigation({ waitUntil: 'networkidle2' }),
-  // ]);
-  await page.click('button[type="submit"]');
-  
-  const loggedIn = await page.$('img.global-nav__me-photo');
-  if (loggedIn) {
-    console.log("✅ Login successful.");
-  } else {
-    console.error("❌ Login failed — check credentials or CAPTCHA.");
+    // Wait for navigation or profile photo to appear
+    try {
+      await page.waitForSelector('img.global-nav__me-photo', { timeout: 10000 });
+      console.log("✅ Login successful.");
+
+      return; // stop loop if login successful
+    } catch (e) {
+      console.error("❌ Login failed — check credentials or CAPTCHA.");
+
+      await Setting.updateOne(
+        { _id: login._id },
+        { $set: { status: "failed" } }
+      );
+    }
   }
+
+  // const email = login?.value?.email || "";
+  // const password = login?.value?.password || "";
+
+  // // Go to login page
+  // await page.goto("https://www.linkedin.com/login", { waitUntil: 'domcontentloaded' });
+
+  // await page.waitForSelector('input[name="session_key"]', { timeout: 10000 });
+  // await page.waitForSelector('input[name="session_password"]', { timeout: 10000 });
+
+  // await page.type('input[name="session_key"]', email, { delay: 100 });
+  // await page.type('input[name="session_password"]', password, { delay: 100 });
+
+  // // await Promise.all([
+  // //   page.click('button[type="submit"]'),
+  // //   page.waitForNavigation({ waitUntil: 'networkidle2' }),
+  // // ]);
+  // await page.click('button[type="submit"]');
+
+  // const loggedIn = await page.$('img.global-nav__me-photo');
+  // if (loggedIn) {
+  //   console.log("✅ Login successful.");
+  // } else {
+  //   console.error("❌ Login failed — check credentials or CAPTCHA.");
+  // }
 }
 
 async function keepBrowserAlive() {
@@ -537,50 +512,6 @@ async function keepBrowserAlive() {
 }
 
 keepBrowserAlive();
-
-// router.post("/linkedinLogin", async (req, res) => {
-//   try {
-//     console.log("Launching Puppeteer...");
-
-//     // Launch Puppeteer with a visible browser window
-//     const browser = await puppeteer.launch({
-//       headless: false, // Opens the browser
-//       args: ["--start-maximized"], // Maximizes the browser window
-//       defaultViewport: null, // Prevents viewport resizing
-//     });
-
-//     const page = await browser.newPage();
-
-//     console.log("Opening LinkedIn login page...");
-//     await page.goto("https://www.linkedin.com/login", {
-//       waitUntil: "networkidle2",
-//       timeout: 60000,
-//     });
-
-//     console.log("Waiting for user to log in manually...");
-
-//     // Wait for LinkedIn to redirect to the home page after login
-//     await page.waitForNavigation({ waitUntil: "networkidle2" });
-
-//     console.log("User logged in!");
-
-//     // Get and log cookies after login
-//     const cookies = await page.cookies();
-//     console.log("LinkedIn Cookies:", cookies);
-
-//     res.json({
-//       status: "success",
-//       message: "User logged into LinkedIn successfully",
-//       cookies, // Return cookies if needed
-//     });
-//   } catch (error) {
-//     console.error("Error in LinkedIn login:", error);
-//     res.status(500).json({
-//       status: "error",
-//       message: "Something went wrong",
-//     });
-//   }
-// });
 
 router.post("/linkedAccount", async (req, res) => {
   const postData = req.body;
@@ -1895,70 +1826,6 @@ router.post("/cronjobForTagSearch", async (req, res) => {
   }
 });
 
-// router.post("/cronjobToSinglePostCommentURLBase", async (req, res) => {
-//   const postData = req.body;
-//   const PostUrl = CleanHTMLData(CleanDBData(postData.url));
-
-//   try {
-//     await page.goto(PostUrl, { waitUntil: "load", timeout: 60000 });
-
-//     // find the comment input box and type the comment
-//     await page.waitForSelector("main");
-//     await page.waitForSelector(
-//       "div.update-components-text.update-components-update-v2__commentary"
-//     );
-
-// const postData = await page.evaluate(() => {
-//   // Select the first matching element
-//   return (
-//     document
-//       .querySelector(
-//         "div.update-components-text.update-components-update-v2__commentary"
-//       )
-//       .textContent.trim() || "No post found"
-//   );
-// });
-// console.log("🚀 ~ PostData:", postData);
-
-
-//     const commentText = "Hello World";
-
-//     // const commentText = "Good post!";
-//     const commentBoxSelector = `div.ql-editor[contenteditable="true"]`;
-//     // Wait for the comment box to appear
-//     await page.waitForSelector(commentBoxSelector, {
-//       visible: true,
-//       timeout: 10000,
-//     });
-//     // Focus on the comment box
-//     await page.focus(commentBoxSelector);
-//     // Type the comment
-//     await page.type(commentBoxSelector, commentText);
-//     console.log("Comment typed successfully.");
-//     const commentButtonSelector = `button.comments-comment-box__submit-button--cr`;
-//     // Ensure the Comment button is enabled and visible
-//     await page.waitForSelector(commentButtonSelector, { visible: true });
-//     // Click on the Comment button
-//     await page.click(commentButtonSelector);
-//     console.log("Comment posted successfully.");
-
-
-
-
-
-//     res.json({
-//       status: "success",
-//       message: `Cron job is executed`,
-//     });
-//   } catch (error) {
-//     console.error("Error during registration:", error);
-//     res.json({
-//       status: "error",
-//       message: "Something want wrong",
-//     });
-//   }
-// });
-
 router.post("/cronjobToSinglePostReactAndComment", async (req, res) => {
   const PostUrl = "https://www.linkedin.com/posts/faisal-akhtar-663650296_git-code-devlife-activity-7298535715586347008-pB7-?utm_source=share&utm_medium=member_desktop&rcm=ACoAAEekgKsBrmFcR47JU7h_Z3yCBkb1MWaWAqQ"
   const comment = "Great post!";
@@ -2251,10 +2118,10 @@ router.post('/cronjobtogetrecentpostmuititab', async (req, res) => {
   }
 });
 
-// cron.schedule('*/30 * * * *', async () => {
-//   console.log('Running cron job every 30 min');
-cron.schedule('* * * * *', async () => {
-  console.log('Running cron job every 1 min');
+cron.schedule('*/30 * * * *', async () => {
+  console.log('Running cron job every 30 min');
+  // cron.schedule('* * * * *', async () => {
+  //   console.log('Running cron job every 1 min');
   await cronJobToGetRecentPostsMultiTab();
   res.json({ message: "Cron job executed cronJobToGetRecentPostsMultiTab" });
 });
@@ -2348,80 +2215,7 @@ async function scrapeRecentPost({ creator, userid, linkedAccountId }) {
   }
 }
 
-
-// router.post('/cronjobtocommentrecentpostfromdb', async (req, res) => {
-//   try {
-//     const postsData = await CommentDetail.find({ status: 'pending' });
-
-//     // Group by userid first
-//     const groupedByUser = postsData.reduce((acc, obj) => {
-//       const userId = obj.userid;
-//       if (!acc[userId]) {
-//         acc[userId] = {};
-//       }
-
-//       // Group by linkedAccountId within each user
-//       const linkedAccountId = obj.linkedAccountId;
-//       if (!acc[userId][linkedAccountId]) {
-//         acc[userId][linkedAccountId] = [];
-//       }
-//       acc[userId][linkedAccountId].push(obj);
-
-//       return acc;
-//     }, {});
-
-//     // Convert the grouped object into a 3D array
-//     const grouped3DArray = Object.values(groupedByUser).map(userGroup => {
-//       return Object.values(userGroup);  // Grouped by linkedAccountId within each user
-//     });
-
-//     // console.log(grouped3DArray);
-
-//     for (const userGroup of grouped3DArray) {
-//       const userid = userGroup[0][0]?.userid;
-//       console.log(`User ID: ${userid},`)
-//       const user = await User.findById(userid);
-//       const cookies = JSON.parse(user?.cookie);
-//       // console.log("🚀 ~ router.post ~ cookies:", cookies)
-//       const browser = await puppeteer.launch({
-//         // headless: "new",
-//         headless: false,
-//         args: ["--start-maximized", "--no-sandbox", "--disable-setuid-sandbox"], // Maximizes the browser window
-//         defaultViewport: null, // Ensures no viewport resizing
-//       });
-//       const page = await browser.newPage();
-//       await page.setCookie(...cookies);
-
-//       // Go to LinkedIn Login page
-//       const url = "https://www.linkedin.com/login";
-//       await page.goto(url, { waitUntil: "load", timeout: 60000 });
-
-//       for (const linkedGroup of userGroup) {
-//         const linkedAccountId = linkedGroup[0]?.linkedAccountId;
-//         console.log(`Linked Account ID: ${linkedAccountId}`)
-//         // const linkedAccount = await LinkedAccount.findById(linkedAccountId);
-//         // console.log("🚀 ~ router.post ~ linkedAccount:", linkedAccount)
-
-//         for (const post of linkedGroup) {
-//           const postUrl = post?.postUrl;
-//           const userid = post?.userid;
-//           const linkedAccountId = post?.linkedAccountId;
-//           const creatorid = post?.creatorid;
-
-//           // Do something with the values
-//           // console.log(postUrl, userid, linkedAccountId, creatorid);
-//         }
-//       }
-//     }
-
-//     res.json({ status: "success", message: 'Data saved successfully', grouped3DArray });
-//   } catch (error) {
-//     console.error(error);
-//     res.json({ message: 'Error saving data', error });
-//   }
-// });
-
-
+// cron.schedule('* * * * * *', async () => {
 cron.schedule('* 8-10,12-14 * * 1-5', async () => {
   console.log('Running cron job during allowed hours, Mon–Fri');
   await cronJobToCommentRecentPostsFromDbMultiBrowser();
@@ -2447,15 +2241,16 @@ async function cronJobToCommentRecentPostsFromDbMultiBrowser() {
 
     const jobs = grouped3DArray.map(userGroup =>
       limit(async () => {
-        const userid = userGroup[0][0]?.userid;
-        const user = await User.findById(userid);
+        // console.log("userGroup", userGroup)
+        const linkedAccountId = userGroup[0][0]?.linkedAccountId;
+        const user = await LinkedAccount.findById(linkedAccountId);
         const login = JSON.parse(user?.cookie);
 
         const email = login?.email || "";
         const password = login?.password || "";
 
         const browser = await puppeteer.launch({
-          headless: false,
+          headless: "new",
           args: ["--start-maximized", "--no-sandbox", "--disable-setuid-sandbox"],
           defaultViewport: null,
           userDataDir: `./tmp/puppeteer-sessions/profiles/${email.split('@')[0]}`,
@@ -2764,249 +2559,249 @@ async function cronJobToCommentRecentPostsFromDbMultiBrowser() {
   }
 }
 
-router.post('/cronjobtocommentrecentpostfromdbmultibrowser', async (req, res) => {
-  try {
-    const pLimit = (await import('p-limit')).default;
-    const limit = pLimit(3); // Limit to 3 browsers in parallel
+// router.post('/cronjobtocommentrecentpostfromdbmultibrowser', async (req, res) => {
+//   try {
+//     const pLimit = (await import('p-limit')).default;
+//     const limit = pLimit(3); // Limit to 3 browsers in parallel
 
-    const postsData = await CommentDetail.find({ status: 'pending' });
+//     const postsData = await CommentDetail.find({ status: 'pending' });
 
-    const groupedByUser = postsData.reduce((acc, obj) => {
-      const { userid, linkedAccountId } = obj;
-      acc[userid] = acc[userid] || {};
-      acc[userid][linkedAccountId] = acc[userid][linkedAccountId] || [];
-      acc[userid][linkedAccountId].push(obj);
-      return acc;
-    }, {});
+//     const groupedByUser = postsData.reduce((acc, obj) => {
+//       const { userid, linkedAccountId } = obj;
+//       acc[userid] = acc[userid] || {};
+//       acc[userid][linkedAccountId] = acc[userid][linkedAccountId] || [];
+//       acc[userid][linkedAccountId].push(obj);
+//       return acc;
+//     }, {});
 
-    const grouped3DArray = Object.values(groupedByUser).map(userGroup => Object.values(userGroup));
+//     const grouped3DArray = Object.values(groupedByUser).map(userGroup => Object.values(userGroup));
 
-    const jobs = grouped3DArray.map(userGroup =>
-      limit(async () => {
-        const userid = userGroup[0][0]?.userid;
-        const user = await User.findById(userid);
-        const login = JSON.parse(user?.cookie);
+//     const jobs = grouped3DArray.map(userGroup =>
+//       limit(async () => {
+//         const userid = userGroup[0][0]?.userid;
+//         const user = await User.findById(userid);
+//         const login = JSON.parse(user?.cookie);
 
-        const email = login?.email || "";
-        const password = login?.password || "";
+//         const email = login?.email || "";
+//         const password = login?.password || "";
 
-        const browser = await puppeteer.launch({
-          headless: false,
-          args: ["--start-maximized", "--no-sandbox", "--disable-setuid-sandbox"],
-          defaultViewport: null,
-          userDataDir: `./tmp/puppeteer-sessions/profiles/${email.split('@')[0]}`,
-          // args: ['--proxy-server=http://your.proxy:port']
-        });
+//         const browser = await puppeteer.launch({
+//           headless: false,
+//           args: ["--start-maximized", "--no-sandbox", "--disable-setuid-sandbox"],
+//           defaultViewport: null,
+//           userDataDir: `./tmp/puppeteer-sessions/profiles/${email.split('@')[0]}`,
+//           // args: ['--proxy-server=http://your.proxy:port']
+//         });
 
-        // await page.authenticate({ username: 'username', password: 'password' });
+//         // await page.authenticate({ username: 'username', password: 'password' });
 
-        const page = await browser.newPage();
-        await page.setDefaultNavigationTimeout(60000);
+//         const page = await browser.newPage();
+//         await page.setDefaultNavigationTimeout(60000);
 
-        // Go to LinkedIn homepage with existing session
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36');
+//         // Go to LinkedIn homepage with existing session
+//         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36');
 
-        await page.goto("https://www.linkedin.com/feed", { waitUntil: 'domcontentloaded' });
+//         await page.goto("https://www.linkedin.com/feed", { waitUntil: 'domcontentloaded' });
 
-        let isLoggedIn = false;
+//         let isLoggedIn = false;
 
-        console.log("🚀 isLoggedIn before:", isLoggedIn)
-        try {
-          const profilePhoto = await page.$('img.global-nav__me-photo')
-          console.log("🚀 ~ limit ~ profilePhoto:", profilePhoto)
+//         console.log("🚀 isLoggedIn before:", isLoggedIn)
+//         try {
+//           const profilePhoto = await page.$('img.global-nav__me-photo')
+//           console.log("🚀 ~ limit ~ profilePhoto:", profilePhoto)
 
-          if (profilePhoto) {
-            isLoggedIn = true;
-            console.log(`✅ Already logged in for ${email}`);
-          } else {
-            console.log(`🔐 Not logged in for ${email}`);
-          }
-        } catch (e) {
-          console.log(`🔐 Not logged in for ${email} — login attempt required.`);
-        }
+//           if (profilePhoto) {
+//             isLoggedIn = true;
+//             console.log(`✅ Already logged in for ${email}`);
+//           } else {
+//             console.log(`🔐 Not logged in for ${email}`);
+//           }
+//         } catch (e) {
+//           console.log(`🔐 Not logged in for ${email} — login attempt required.`);
+//         }
 
-        console.log("🚀 isLoggedIn after:", isLoggedIn)
+//         console.log("🚀 isLoggedIn after:", isLoggedIn)
 
-        if (isLoggedIn === false) {
+//         if (isLoggedIn === false) {
 
-          const cookies = await page.cookies('https://www.linkedin.com');
-          for (const cookie of cookies) {
-            await page.deleteCookie({ name: cookie.name, domain: cookie.domain });
-          }
-          console.log("✅ All LinkedIn cookies deleted.");
-
-
-          await page.goto("https://www.linkedin.com/login", { waitUntil: 'domcontentloaded' });
-
-          await page.waitForSelector('input[name="session_key"]', { timeout: 10000 });
-          await page.waitForSelector('input[name="session_password"]', { timeout: 10000 });
-
-          await page.type('input[name="session_key"]', email, { delay: 100 });
-          await page.type('input[name="session_password"]', password, { delay: 100 });
-
-          await Promise.all([
-            page.click('button[type="submit"]'),
-            page.waitForNavigation({ waitUntil: 'networkidle2' }),
-          ]);
+//           const cookies = await page.cookies('https://www.linkedin.com');
+//           for (const cookie of cookies) {
+//             await page.deleteCookie({ name: cookie.name, domain: cookie.domain });
+//           }
+//           console.log("✅ All LinkedIn cookies deleted.");
 
 
-          const currentUrl = page.url();
-          const isLoggedIn = currentUrl.includes('/feed');
+//           await page.goto("https://www.linkedin.com/login", { waitUntil: 'domcontentloaded' });
 
-          console.log(`🔍 Current URL: ${currentUrl}`);
-          console.log(`✅ Logged in: ${isLoggedIn}`);
+//           await page.waitForSelector('input[name="session_key"]', { timeout: 10000 });
+//           await page.waitForSelector('input[name="session_password"]', { timeout: 10000 });
 
+//           await page.type('input[name="session_key"]', email, { delay: 100 });
+//           await page.type('input[name="session_password"]', password, { delay: 100 });
 
-          // Double-check login success
-          // const profilePhoto = await page.$('img.global-nav__me-photo');
-          // if (profilePhoto) {
-          //   console.log(`✅ Login successful for ${email}`);
-          // } else {
-          //   console.error(`❌ Login failed for ${email}`);
-          //   // await browser.close();
-          //   return;
-          // }
-        }
+//           await Promise.all([
+//             page.click('button[type="submit"]'),
+//             page.waitForNavigation({ waitUntil: 'networkidle2' }),
+//           ]);
 
 
+//           const currentUrl = page.url();
+//           const isLoggedIn = currentUrl.includes('/feed');
+
+//           console.log(`🔍 Current URL: ${currentUrl}`);
+//           console.log(`✅ Logged in: ${isLoggedIn}`);
 
 
-        for (const linkedGroup of userGroup) {
-          const linkedAccountId = linkedGroup[0]?.linkedAccountId;
-          const linkedAccount = await LinkedAccount.findById(linkedAccountId);
-          const nameToClick = linkedAccount?.name;
-          console.log("🚀 ~ limit ~ nameToClick:", nameToClick)
-
-          // await delay(10000);
-
-          for (const post of linkedGroup) {
-            const { postUrl, userid, linkedAccountId, creatorid } = post;
-
-            console.log("🚀 ~ Navigating to Post:", postUrl);
-            await delay(2000);
-            await page.goto(postUrl, { waitUntil: "load", timeout: 60000 });
-            await delay(2000);
-
-            await page.waitForSelector("main");
-
-            await page.waitForSelector("div.update-components-text.update-components-update-v2__commentary");
-
-            const { postData, postAuthor } = await page.evaluate(() => {
-              const postData = document.querySelector("div.update-components-text.update-components-update-v2__commentary")?.textContent.trim() || "No post found";
-              const postAuthor = document.querySelector(".update-components-actor__title span[aria-hidden='true']")?.textContent.trim() || "Author not found";
-              return { postData, postAuthor };
-            });
-
-            console.log("🚀 ~ PostData:", postData);
-            console.log("👤 ~ Author:", postAuthor);
-
-            let commentSetting = await CommentSetting.findOne({ creatorid, linkedAccountId })
-              ?? await CommentSetting.findOne({ creatorid: "0", linkedAccountId });
-
-            const enabledCommentSettings = ["emoji", "hashtag", "lowercase", "exclamation", "author"]
-              .filter(setting => commentSetting?.[setting]);
-
-            const linkedAccountTone = await LinkedAccountTone.findOne({ linkedAccountId });
-
-            const {
-              commentsLength,
-              formalityLevel,
-              personality,
-              questionsFrequency,
-              tone,
-              gender
-            } = linkedAccountTone || {};
-
-            const settingRules = {
-              emoji: "Turn on emojis and use 1 or 2.",
-              hashtag: "Turn on hashtags and use 1 or 2.",
-              lowercase: "Write in lowercase letters.",
-              exclamation: "Use exclamation marks where necessary.",
-              author: "Tag the post author.",
-            };
-
-            const toneRules = {
-              commentsLength: commentsLength && `Keep comments about ${commentsLength} characters long.`,
-              formalityLevel: formalityLevel && `Use a ${formalityLevel} tone.`,
-              personality: personality && `Reflect a ${personality} personality.`,
-              questionsFrequency: questionsFrequency && `Include questions with a frequency of ${questionsFrequency}.`,
-              tone: tone && `Use a ${tone} tone.`,
-              gender: gender && `Consider me as a ${gender}.`
-            };
-
-            let rules = "Write a human-like comment and follow the rules below:";
-            let index = 1;
-            enabledCommentSettings.forEach(setting => {
-              if (settingRules[setting]) {
-                rules += `\n${index++}. ${settingRules[setting]}`;
-              }
-            });
-            Object.values(toneRules).forEach(rule => {
-              if (rule) {
-                rules += `\n${index++}. ${rule}`;
-              }
-            });
-
-            rules +=
-              `\nsome examples of real humans comment below
+//           // Double-check login success
+//           // const profilePhoto = await page.$('img.global-nav__me-photo');
+//           // if (profilePhoto) {
+//           //   console.log(`✅ Login successful for ${email}`);
+//           // } else {
+//           //   console.error(`❌ Login failed for ${email}`);
+//           //   // await browser.close();
+//           //   return;
+//           // }
+//         }
 
 
-"I would like to see what you "bro-ing out" on us would look like. 
--------
-I do wonder if teleportation will ever be a thing.
-Morning sprint + Posting spring + Evening sprint.
--------
-3 times I log in daily. And it's more than enough!
-"You can’t outgrow the limits of your own self-perception"
--------
-OK, WOW. 🔥
-...
-Post Author = "${postAuthor}"
-Post Content
-"${postData}"
-`;
 
-            console.log("rules:", rules);
 
-            // const completion = await openai.chat.completions.create({ ...})
-            const commentText = "Good post!";
-            const commentBoxSelector = `div.ql-editor[contenteditable="true"]`;
-            // Wait for the comment box to appear
-            await page.waitForSelector(commentBoxSelector, {
-              visible: true,
-              timeout: 10000,
-            });
-            // Focus on the comment box
-            await page.focus(commentBoxSelector);
-            // Type the comment
-            await page.type(commentBoxSelector, commentText);
-            console.log("Comment typed successfully.");
+//         for (const linkedGroup of userGroup) {
+//           const linkedAccountId = linkedGroup[0]?.linkedAccountId;
+//           const linkedAccount = await LinkedAccount.findById(linkedAccountId);
+//           const nameToClick = linkedAccount?.name;
+//           console.log("🚀 ~ limit ~ nameToClick:", nameToClick)
 
-            const commentButtonSelector = `button.comments-comment-box__submit-button--cr`;
-            // Ensure the Comment button is enabled and visible
-            await page.waitForSelector(commentButtonSelector, { visible: true });
-            // Click on the Comment button
-            // await page.click(commentButtonSelector);
+//           // await delay(10000);
 
-            console.log("Comment posted successfully.");
+//           for (const post of linkedGroup) {
+//             const { postUrl, userid, linkedAccountId, creatorid } = post;
 
-            await delay(3000);
-          }
-        }
+//             console.log("🚀 ~ Navigating to Post:", postUrl);
+//             await delay(2000);
+//             await page.goto(postUrl, { waitUntil: "load", timeout: 60000 });
+//             await delay(2000);
 
-        await browser.close();
-      })
-    );
+//             await page.waitForSelector("main");
 
-    await Promise.all(jobs);
+//             await page.waitForSelector("div.update-components-text.update-components-update-v2__commentary");
 
-    res.json({ status: "success", message: 'All jobs processed with concurrency control' });
+//             const { postData, postAuthor } = await page.evaluate(() => {
+//               const postData = document.querySelector("div.update-components-text.update-components-update-v2__commentary")?.textContent.trim() || "No post found";
+//               const postAuthor = document.querySelector(".update-components-actor__title span[aria-hidden='true']")?.textContent.trim() || "Author not found";
+//               return { postData, postAuthor };
+//             });
 
-  } catch (error) {
-    console.error("❌ Error during job:", error);
-    res.json({ status: "error", message: 'Error saving data', error });
-  }
-});
+//             console.log("🚀 ~ PostData:", postData);
+//             console.log("👤 ~ Author:", postAuthor);
+
+//             let commentSetting = await CommentSetting.findOne({ creatorid, linkedAccountId })
+//               ?? await CommentSetting.findOne({ creatorid: "0", linkedAccountId });
+
+//             const enabledCommentSettings = ["emoji", "hashtag", "lowercase", "exclamation", "author"]
+//               .filter(setting => commentSetting?.[setting]);
+
+//             const linkedAccountTone = await LinkedAccountTone.findOne({ linkedAccountId });
+
+//             const {
+//               commentsLength,
+//               formalityLevel,
+//               personality,
+//               questionsFrequency,
+//               tone,
+//               gender
+//             } = linkedAccountTone || {};
+
+//             const settingRules = {
+//               emoji: "Turn on emojis and use 1 or 2.",
+//               hashtag: "Turn on hashtags and use 1 or 2.",
+//               lowercase: "Write in lowercase letters.",
+//               exclamation: "Use exclamation marks where necessary.",
+//               author: "Tag the post author.",
+//             };
+
+//             const toneRules = {
+//               commentsLength: commentsLength && `Keep comments about ${commentsLength} characters long.`,
+//               formalityLevel: formalityLevel && `Use a ${formalityLevel} tone.`,
+//               personality: personality && `Reflect a ${personality} personality.`,
+//               questionsFrequency: questionsFrequency && `Include questions with a frequency of ${questionsFrequency}.`,
+//               tone: tone && `Use a ${tone} tone.`,
+//               gender: gender && `Consider me as a ${gender}.`
+//             };
+
+//             let rules = "Write a human-like comment and follow the rules below:";
+//             let index = 1;
+//             enabledCommentSettings.forEach(setting => {
+//               if (settingRules[setting]) {
+//                 rules += `\n${index++}. ${settingRules[setting]}`;
+//               }
+//             });
+//             Object.values(toneRules).forEach(rule => {
+//               if (rule) {
+//                 rules += `\n${index++}. ${rule}`;
+//               }
+//             });
+
+//             rules +=
+//               `\nsome examples of real humans comment below
+
+
+// "I would like to see what you "bro-ing out" on us would look like. 
+// -------
+// I do wonder if teleportation will ever be a thing.
+// Morning sprint + Posting spring + Evening sprint.
+// -------
+// 3 times I log in daily. And it's more than enough!
+// "You can’t outgrow the limits of your own self-perception"
+// -------
+// OK, WOW. 🔥
+// ...
+// Post Author = "${postAuthor}"
+// Post Content
+// "${postData}"
+// `;
+
+//             console.log("rules:", rules);
+
+//             // const completion = await openai.chat.completions.create({ ...})
+//             const commentText = "Good post!";
+//             const commentBoxSelector = `div.ql-editor[contenteditable="true"]`;
+//             // Wait for the comment box to appear
+//             await page.waitForSelector(commentBoxSelector, {
+//               visible: true,
+//               timeout: 10000,
+//             });
+//             // Focus on the comment box
+//             await page.focus(commentBoxSelector);
+//             // Type the comment
+//             await page.type(commentBoxSelector, commentText);
+//             console.log("Comment typed successfully.");
+
+//             const commentButtonSelector = `button.comments-comment-box__submit-button--cr`;
+//             // Ensure the Comment button is enabled and visible
+//             await page.waitForSelector(commentButtonSelector, { visible: true });
+//             // Click on the Comment button
+//             // await page.click(commentButtonSelector);
+
+//             console.log("Comment posted successfully.");
+
+//             await delay(3000);
+//           }
+//         }
+
+//         await browser.close();
+//       })
+//     );
+
+//     await Promise.all(jobs);
+
+//     res.json({ status: "success", message: 'All jobs processed with concurrency control' });
+
+//   } catch (error) {
+//     console.error("❌ Error during job:", error);
+//     res.json({ status: "error", message: 'Error saving data', error });
+//   }
+// });
 
 
 (module.exports = router), browser, { page };

@@ -1,7 +1,6 @@
-// app.js
 const express = require('express');
 const bodyParser = require('body-parser');
-const cors = require('cors');  // Import CORS
+const cors = require('cors');
 const connectDB = require('./config/database');
 const adminApiRoutes = require('./routes/adminroutes');
 const userroutes = require('./routes/userroutes');
@@ -17,53 +16,43 @@ connectDB();
 
 const app = express();
 
+// Serve static files
 app.use("/uploads", express.static("uploads"));
 
-// Middleware
-// app.use(cors({
-//   origin: ['http://localhost:3000', 'chrome-extension://efjfmebnbnhbiiflcjejloippmdgaila'],
-//   methods: ['GET', 'POST']
-// }));
+// ✅ CORS Middleware
+const allowedOrigins = [
+  'http://localhost:3000',
+  'https://connect-in-iota.vercel.app',
+  'https://0918-103-232-142-179.ngrok-free.app', // ← your current ngrok frontend URL
+];
 
 app.use(cors({
   origin: (origin, callback) => {
-    const allowedOrigins = [
-      'http://localhost:3000',
-      'http://localhost:3005'
-    ];
-
-    if (
-      !origin || // Allow Postman, curl, etc.
-      allowedOrigins.includes(origin) ||
-      origin.startsWith('chrome-extension://')
-    ) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
+    if (!origin || allowedOrigins.includes(origin) || origin.startsWith('chrome-extension://')) {
+      return callback(null, true);
     }
+    return callback(new Error(`❌ Not allowed by CORS: ${origin}`));
   },
-  methods: ['GET', 'POST'],
-  credentials: true // optional, only if you use cookies or auth headers
+  methods: ['GET', 'POST', 'OPTIONS'],
+  credentials: true
 }));
 
-
+// 🌍 Log the origin of requests (for debugging)
 app.use((req, res, next) => {
-  console.log('Origin:', req.get('Origin'));
+  console.log('🌍 Request Origin:', req.get('Origin'));
   next();
 });
 
+// Middleware
 app.use(bodyParser.json());
-
-// const userProfile = backendURL + 'assets/user.png';
-// console.log("🚀 ~ userProfile:", userProfile)
 
 // Routes
 app.use('/api/admin', adminApiRoutes);
 app.use('/api/user', userroutes);
 app.use('/api/extension', extensionroute);
 
+// Start server
 const PORT = process.env.PORT || 3000;
-
 app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+  console.log(`🚀 Server is running on port ${PORT}`);
 });
