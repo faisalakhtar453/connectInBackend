@@ -25,7 +25,7 @@ const allowedOrigins = [
   'https://connect-in-iota.vercel.app',
   'https://connect-204jzoomo-faisals-projects-b859655a.vercel.app',
   'https://connect-b0eah8v3r-faisals-projects-b859655a.vercel.app',
-  'https://0918-103-232-142-179.ngrok-free.app', // ← your current ngrok frontend URL
+  'https://b439-103-232-142-183.ngrok-free.app', // ← your current ngrok frontend URL
 ];
 
 app.use(cors({
