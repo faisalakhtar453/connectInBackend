@@ -24,6 +24,7 @@ const allowedOrigins = [
   'http://localhost:3000',
   'https://connect-in-iota.vercel.app',
   'https://connect-204jzoomo-faisals-projects-b859655a.vercel.app',
+  'https://connect-b0eah8v3r-faisals-projects-b859655a.vercel.app',
   'https://0918-103-232-142-179.ngrok-free.app', // ← your current ngrok frontend URL
 ];
 
