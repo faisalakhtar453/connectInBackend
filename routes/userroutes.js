@@ -350,7 +350,7 @@ router.post("/userCommentDetail", async (req, res) => {
   try {
     const authUser = await checkAuthorization(req, res);
     if (authUser) {
-      const data = await CommentDetail.find({ userid: authUser, status: "commented" });
+      const data = await CommentDetail.find({ userid: authUser });
 
       const enrichedData = await Promise.all(
         data.map(async (item) => {
@@ -1639,7 +1639,7 @@ router.post("/cronjobForCreator", async (req, res) => {
 
           let rules = `Generate a comment for this post: "${postData}"
 					*Rules:*
-					- Less than 500 characters`;
+					- Less than 200 characters`;
 
           const settingRules = {
             emojis: "Use emojis",
@@ -2118,10 +2118,10 @@ router.post('/cronjobtogetrecentpostmuititab', async (req, res) => {
   }
 });
 
-cron.schedule('*/30 * * * *', async () => {
-  console.log('Running cron job every 30 min');
-  // cron.schedule('* * * * *', async () => {
-  //   console.log('Running cron job every 1 min');
+// cron.schedule('*/30 * * * *', async () => {
+//   console.log('Running cron job every 30 min');
+cron.schedule('* * * * *', async () => {
+  console.log('Running cron job every 1 min');
   await cronJobToGetRecentPostsMultiTab();
   res.json({ message: "Cron job executed cronJobToGetRecentPostsMultiTab" });
 });
@@ -2151,18 +2151,24 @@ async function cronJobToGetRecentPostsMultiTab() {
 
         console.log("🚀 ~ cronJobToGetRecentPostsMultiTab ~ creators:", creators)
 
-        await Creator.updateMany(
-          { linkedAccountId, status: "active" },
-          { $set: { lastScrapedAt: new Date().toISOString() } }
-        );
 
+        if(creators.length > 0) {
 
+          await Creator.updateMany(
+            { linkedAccountId, status: "active" },
+            { $set: { lastScrapedAt: new Date().toISOString() } }
+          );
+  
+  
+  
+          const tasks = creators.map((creator) =>
+            limit(() => scrapeRecentPost({ creator, userid, linkedAccountId }))
+          );
+  
+          await Promise.all(tasks); // Wait for all creator tasks
 
-        const tasks = creators.map((creator) =>
-          limit(() => scrapeRecentPost({ creator, userid, linkedAccountId }))
-        );
+        }
 
-        await Promise.all(tasks); // Wait for all creator tasks
       }
     }
 
@@ -2531,7 +2537,7 @@ async function cronJobToCommentRecentPostsFromDbMultiBrowser() {
             // Ensure the Comment button is enabled and visible
             await page.waitForSelector(commentButtonSelector, { visible: true });
             // Click on the Comment button
-            // await page.click(commentButtonSelector);
+            await page.click(commentButtonSelector);
 
             console.log("Comment posted successfully.");
 
