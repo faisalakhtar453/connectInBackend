@@ -411,7 +411,7 @@ let browser, page;
 
 async function launchBrowser() {
   browser = await puppeteer.launch({
-    headless: "new",
+    headless: false,
     args: ["--start-maximized", "--no-sandbox", "--disable-setuid-sandbox"],
     defaultViewport: null,
     userDataDir: "./tmp/puppeteer-sessions/linkedin-profile-admin", // Persist session
@@ -2256,7 +2256,7 @@ async function cronJobToCommentRecentPostsFromDbMultiBrowser() {
         const password = login?.password || "";
 
         const browser = await puppeteer.launch({
-          headless: "new",
+          headless: false,
           args: ["--start-maximized", "--no-sandbox", "--disable-setuid-sandbox"],
           defaultViewport: null,
           userDataDir: `./tmp/puppeteer-sessions/profiles/${email.split('@')[0]}`,
@@ -2476,7 +2476,7 @@ async function cronJobToCommentRecentPostsFromDbMultiBrowser() {
 
             // Insert hardcoded rule
             let index = 1;
-            rules += `\n${index++}. Keep the comment under 500 characters.`;
+            rules += `\n${index++}. Keep the comment under 300 characters.`;
 
             // Add enabled settings
             enabledCommentSettings.forEach(setting => {

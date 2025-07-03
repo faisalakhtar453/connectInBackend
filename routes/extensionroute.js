@@ -26,7 +26,7 @@ async function getBrowser() {
 }
 
 function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 
@@ -342,8 +342,8 @@ router.post('/loginDetail', async (req, res) => {
         );
 
         const browser = await puppeteer.launch({
-            headless: 'new', // Use 'new' for better performance
-            // headless: false, // Use 'new' for better performance
+            // headless: 'new', // Use 'new' for better performance
+            headless: false,
             args: ["--start-maximized", "--no-sandbox", "--disable-setuid-sandbox"],
             defaultViewport: null,
         });
@@ -364,23 +364,9 @@ router.post('/loginDetail', async (req, res) => {
 
         await page.click('button[type="submit"]');
 
-        // Navigate directly to LinkedIn profile
-        await page.goto("https://www.linkedin.com/in/me/", { waitUntil: 'domcontentloaded' });
-
-        // Extract profile data using faster parallel fetching
-        const profileData = await page.evaluate(() => {
-            return {
-                imageUrl: document.querySelector("img.evi-image.ember-view.profile-photo-edit__preview")?.src || 'user.png',
-                name: document.querySelector("h1.inline.t-24.v-align-middle.break-words")?.innerText.trim() || 'No Name found',
-                tagLine: document.querySelector('.text-body-medium.break-words[data-generated-suggestion-target]')?.innerText.trim() || 'No Tag Line found',
-                profileLink: document.querySelector('p.t-14.t-normal.t-black--light.pt1.break-words')?.innerText.trim() || 'No Profile Link found',
-            };
-        },);
-
-        console.log("🔹 Profile Data:", profileData);
 
         // Check if company section exists (faster check using `evaluate`)
-        await page.goto("https://www.linkedin.com/feed/", { waitUntil: 'domcontentloaded' });
+        // await page.goto("https://www.linkedin.com/feed/", { waitUntil: 'domcontentloaded' });
 
         const companySelector = ".org-organization-admin-pages-entrypoint-card__item";
         const nameSelector = "span.text-body-xsmall-bold.t-black";
@@ -405,6 +391,21 @@ router.post('/loginDetail', async (req, res) => {
         );
 
         console.log("🏢 Company Data:", pageData);
+
+        // Navigate directly to LinkedIn profile
+        await page.goto("https://www.linkedin.com/in/me/", { waitUntil: 'domcontentloaded' });
+
+        // Extract profile data using faster parallel fetching
+        const profileData = await page.evaluate(() => {
+            return {
+                imageUrl: document.querySelector("img.evi-image.ember-view.profile-photo-edit__preview")?.src || 'user.png',
+                name: document.querySelector("h1.inline.t-24.v-align-middle.break-words")?.innerText.trim() || 'No Name found',
+                tagLine: document.querySelector('.text-body-medium.break-words[data-generated-suggestion-target]')?.innerText.trim() || 'No Tag Line found',
+                profileLink: document.querySelector('p.t-14.t-normal.t-black--light.pt1.break-words')?.innerText.trim() || 'No Profile Link found',
+            };
+        },);
+
+        console.log("🔹 Profile Data:", profileData);
 
         const Linkacc = await LinkedAccount.findOneAndUpdate(
             { userid: userid, url: profileData?.profileLink },
