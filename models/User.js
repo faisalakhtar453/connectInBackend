@@ -10,9 +10,9 @@ const UserSchema = new mongoose.Schema({
   emailStatus: { type: String },
   forgotpasswordotp: { type: String },
   packageid: { type: String },
-  cookie: { type: String },
-  extensionStatus: { type: Boolean },
-  cookieStatus: { type: Boolean },
+  // cookie: { type: String },
+  // extensionStatus: { type: Boolean },
+  // cookieStatus: { type: Boolean },
   contact: { type: String },
   address1: { type: String },
   address2: { type: String },
@@ -20,7 +20,7 @@ const UserSchema = new mongoose.Schema({
   country: { type: String },
   bio: { type: String },
   image: { type: String },
-  role: { type: String },
+  role: { type: String, default:'user' },
   googleId: { type: String },
 }, { timestamps: true });
 

@@ -8,7 +8,9 @@ const LinkedAccount = new mongoose.Schema({
     tagLine: { type: String },
     pageData: { type: String },
     status: { type: String },
-    cookie: { type: String }
+    cookie: { type: String },
+    cookieStatus:{ type: String },
+    userAgent:{ type: String },
 }, { timestamps: true });
 
 module.exports = mongoose.model('LinkedAccount', LinkedAccount);

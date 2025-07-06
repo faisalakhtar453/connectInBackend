@@ -3,8 +3,8 @@
 const sanitizeHtml = require('sanitize-html'); // For better HTML sanitization
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
-// const backendURL = `http://localhost:8000/`;
-const backendURL = `https://b439-103-232-142-183.ngrok-free.app/`;
+const backendURL = `http://localhost:8000/`;
+// const backendURL = `https://b439-103-232-142-183.ngrok-free.app/`;
 
 // Cleans data for database inputs (e.g., for MongoDB)
 function CleanDBData(data) {

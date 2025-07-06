@@ -27,6 +27,8 @@
     "nodemailer": "^6.9.15",
     "openai": "^4.80.1",
     "p-limit": "^6.2.0",
+    "playwright": "^1.53.2",
+    "playwright-har": "^0.2.0",
     "puppeteer": "^24.1.0",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
