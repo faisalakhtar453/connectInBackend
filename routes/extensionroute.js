@@ -224,8 +224,8 @@ router.post('/cookiesData', async (req, res) => {
         await CommentSetting.findOneAndUpdate(
             { linkedAccountId: Linkacc?._id },
             {
-                creatorid: "0", emoji: false, hashtag: false, lowercase: false,
-                exclamation: false, author: false, status: true, friendlytone: false
+                creatorid: "0", emoji: false, hashtag: false,
+                exclamation: false, author: false, status: true
             },
             { upsert: true, new: true, }
         );

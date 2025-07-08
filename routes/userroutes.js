@@ -411,8 +411,6 @@ router.post("/generalDetail", async (req, res) => {
 
 
 
-const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36';
-
 let browser, page;
 
 async function launchBrowser() {
@@ -427,6 +425,8 @@ async function launchBrowser() {
     });
 
     page = browser.pages().length ? browser.pages()[0] : await browser.newPage();
+
+    page.setDefaultTimeout(60000); // changes default for all waits
 
     // Stealth setup
     await browser.addInitScript(() => {
@@ -489,7 +489,7 @@ async function launchBrowser() {
       try {
         await page.goto("https://www.linkedin.com/login", { waitUntil: 'domcontentloaded' });
 
-        await page.waitForSelector('input[name="session_key"]', { timeout: 7000 });
+        await page.waitForSelector('input[name="session_key"]', { state: 'visible', timeout: 7000 });
         await page.click('input[name="session_key"]');
         await page.type('input[name="session_key"]', email, { delay: 100 });
 
@@ -497,7 +497,7 @@ async function launchBrowser() {
         await page.type('input[name="session_password"]', password, { delay: 100 });
 
         await page.click('button[type="submit"]');
-        await page.waitForSelector('img.global-nav__me-photo', { timeout: 10000 });
+        await page.waitForSelector('img.global-nav__me-photo', { state: 'visible', timeout: 10000 });
 
         const isLoggedIn = await page.$('img.global-nav__me-photo');
 
@@ -704,12 +704,12 @@ router.post("/findCreator", async (req, res) => {
     page = await browser.newPage();
 
     await page.goto(creatorLink, { waitUntil: "domcontentloaded" });
-
+    console.log("goto", creatorLink)
     const htmlSelector = "img.pv-top-card-profile-picture__image--show.evi-image.ember-view";
     const tagLineHtmlSelector = '.text-body-medium[data-generated-suggestion-target*="urn:li:"]';
     const nameHtmlSelector = "h1.inline.t-24.v-align-middle.break-words";
-
-    await page.waitForSelector(htmlSelector, { waitUntil: "domcontentloaded" });
+    console.log("after selector")
+    await page.waitForSelector(htmlSelector, { state: "visible", timeout: 30000 });
 
     const profileData = await page.evaluate(({ imgSel, tagSel, nameSel }) => {
       const imageNode = document.querySelector(imgSel);
@@ -751,9 +751,9 @@ router.post("/findCreator", async (req, res) => {
       !existingSetting ||
       existingSetting.emoji !== toggles.emoji ||
       existingSetting.hashtag !== toggles.hashtag ||
-      existingSetting.lowercase !== toggles.lowercase ||
+      // existingSetting.lowercase !== toggles.lowercase ||
       existingSetting.exclamation !== toggles.exclamation ||
-      existingSetting.friendlytone !== toggles.friendlytone ||
+      // existingSetting.friendlytone !== toggles.friendlytone ||
       existingSetting.author !== toggles.author;
 
     if (isDifferent) {
@@ -763,9 +763,9 @@ router.post("/findCreator", async (req, res) => {
           creatorid: updatedCreator._id,
           emoji: toggles.emoji,
           hashtag: toggles.hashtag,
-          lowercase: toggles.lowercase,
+          // lowercase: toggles.lowercase,
           exclamation: toggles.exclamation,
-          friendlytone: toggles.friendlytone,
+          // friendlytone: toggles.friendlytone,
           author: toggles.author,
           status: true,
         },
@@ -777,7 +777,7 @@ router.post("/findCreator", async (req, res) => {
 
   } catch (error) {
     console.error("❌ Error during creator registration:", error);
-    res.status(500).json({
+    res.json({
       status: "error",
       message: "Something went wrong",
     });
@@ -1008,7 +1008,7 @@ router.post("/singleUpdateCommentSettingCreatorAccount", async (req, res) => {
         { linkedAccountId: linkedAccountId, creatorid: creatorAccount },
         {
           emoji: toggles.emoji, hashtag: toggles.hashtag,
-          lowercase: toggles.lowercase, exclamation: toggles.exclamation,
+          exclamation: toggles.exclamation,
           author: toggles.author, status: true
         },
         { upsert: true, new: true }
@@ -1436,7 +1436,7 @@ router.post("/singleUpdateCommentSettingKeyword", async (req, res) => {
           userid: authUser,
           emojis: generalSetting?.emoji || false,
           hashtag: generalSetting?.hashtag || false,
-          lowercase: generalSetting?.lowercase || false,
+          // lowercase: generalSetting?.lowercase || false,
           exclamation: generalSetting?.exclamation || false,
         };
         newSettings[key] = value; // Set the provided field value
@@ -1665,11 +1665,10 @@ router.post('/linked-account-tone-one-time', async (req, res) => {
 
 // cron.schedule('*/30 * * * *', async () => {
 //   console.log('Running cron job every 30 min');
-// cron.schedule('* * * * *', async () => {
-//   console.log('Running cron job every 1 min');
-//   await cronJobToGetRecentPostsMultiTab();
-//   res.json({ message: "Cron job executed cronJobToGetRecentPostsMultiTab" });
-// });
+cron.schedule('* * * * *', async () => {
+  // console.log('Running cron job every 1 min');
+  // await cronJobToGetRecentPostsMultiTab();
+});
 
 
 async function cronJobToGetRecentPostsMultiTab() {
@@ -1683,7 +1682,7 @@ async function cronJobToGetRecentPostsMultiTab() {
       const userid = user._id.toString();
       const linkedAccounts = await LinkedAccount.find({ userid, status: "active" });
 
-      console.log("🚀 ~ cronJobToGetRecentPostsMultiTab ~ linkedAccounts:", linkedAccounts)
+      // console.log("🚀 ~ cronJobToGetRecentPostsMultiTab ~ linkedAccounts:", linkedAccounts)
       for (const linkedAccount of linkedAccounts) {
         const linkedAccountId = linkedAccount._id.toString();
 
@@ -1720,9 +1719,9 @@ async function scrapeRecentPost({ creator, userid, linkedAccountId }) {
 
     page = await browser.newPage();
 
-    await page.goto(profileUrl, { waitUntil: "domcontentloaded" });
+    await page.goto(profileUrl, { waitUntil: "networkidle" });
 
-    await page.waitForSelector("div.feed-shared-update-list-carousel", { waitUntil: "domcontentloaded", });
+    await page.waitForSelector("div.feed-shared-update-list-carousel", { state: 'visible' });
 
     await page.evaluate(() => {
       document.querySelectorAll("div.feed-shared-update-list-carousel").forEach(feed => {
@@ -1734,8 +1733,8 @@ async function scrapeRecentPost({ creator, userid, linkedAccountId }) {
       });
     });
 
-    await page.waitForSelector("main", { waitUntil: "domcontentloaded", });
-    await page.waitForSelector("div.update-components-text.update-components-update-v2__commentary", { waitUntil: "domcontentloaded", });
+    await page.waitForSelector("main", { state: 'visible' });
+    await page.waitForSelector("div.update-components-text.update-components-update-v2__commentary", { state: 'visible' });
 
     const postUrl = page.url();
     const existing = await CommentDetail.findOne({ userid, linkedAccountId, creatorid, postUrl });
@@ -1760,9 +1759,8 @@ async function scrapeRecentPost({ creator, userid, linkedAccountId }) {
 
 cron.schedule('* * * * *', async () => {
   // cron.schedule('* 8-10,12-14 * * 1-5', async () => {
-  //   console.log('Running cron job during allowed hours, Mon–Fri');
-  await cronJobToCommentRecentPostsFromDbMultiBrowser();
-  // res.json({ message: "Cron job executed cronJobToCommentRecentPostsFromDbMultiBrowser" });
+  // console.log('Running cron job during allowed hours, Mon–Fri');
+  // await cronJobToCommentRecentPostsFromDbMultiBrowser();
 });
 
 async function cronJobToCommentRecentPostsFromDbMultiBrowser() {
@@ -1812,7 +1810,8 @@ async function cronJobToCommentRecentPostsFromDbMultiBrowser() {
       context = await chromium.launchPersistentContext(userDir, {
         headless,
         args,
-        userAgent
+        userAgent,
+        viewport: null,
         // proxy,
       });
 
@@ -1822,6 +1821,7 @@ async function cronJobToCommentRecentPostsFromDbMultiBrowser() {
         page = await context.newPage();
       }
       // await page.setUserAgent(userAgent);
+      page.setDefaultTimeout(60000); // changes default for all waits
 
       // --- Stealth Injection ---
       await context.addInitScript(() => {
@@ -1926,73 +1926,134 @@ async function cronJobToCommentRecentPostsFromDbMultiBrowser() {
               postAuthor: document.querySelector(".update-components-actor__title span[aria-hidden='true']")?.textContent.trim() || "Author not found",
             }));
 
-            console.log("📄 PostData:", postData);
-            console.log("👤 Author:", postAuthor);
+            // console.log("📄 PostData:", postData);
+            // console.log("👤 Author:", postAuthor);
 
             // Load comment settings and tone
-            const setting = await CommentSetting.findOne({ creatorid, linkedAccountId }) ??
+            const commentSetting = await CommentSetting.findOne({ creatorid, linkedAccountId }) ??
               await CommentSetting.findOne({ creatorid: "0", linkedAccountId });
 
-            const tone = await LinkedAccountTone.findOne({ linkedAccountId });
+            // const tone = await LinkedAccountTone.findOne({ linkedAccountId });
 
-            const enabledCommentSettings = ["emoji", "hashtag", "lowercase", "exclamation", "author"]
-              .filter(s => setting?.[s]);
+            const enabledCommentSettings = ["emoji", "hashtag", "exclamation", "author"]
+              .filter(s => commentSetting?.[s]);
 
-            const toneRules = {
-              commentsLength: tone?.commentsLength && `Keep it ~${tone.commentsLength} characters.`,
-              formalityLevel: tone?.formalityLevel && `Use a ${tone.formalityLevel} tone.`,
-              personality: tone?.personality && `Make it ${tone.personality}.`,
-              questionsFrequency: tone?.questionsFrequency && `Ask questions: ${tone.questionsFrequency}.`,
-              tone: tone?.tone && `Tone: ${tone.tone}`,
-              gender: tone?.gender && `Write as a ${tone.gender}.`
+            const linkedAccountTone = await LinkedAccountTone.findOne({ linkedAccountId });
+            const { commentsLength, formalityLevel, personality, questionsFrequency, tone, gender } = linkedAccountTone || {};
+
+            const settingRules = {
+              emoji: "Turn on emojis and use 1 or 2.",
+              hashtag: "Turn on hashtags and use 1 or 2.",
+              exclamation: "Use exclamation marks where necessary.",
+              author: "Tag the post author.",
             };
 
-            let prompt = "Write a short, human-like LinkedIn comment based on these rules:\n";
-            prompt += "- Keep under 200 characters (strict).\n";
-            enabledCommentSettings.forEach(s => prompt += `- ${s} enabled.\n`);
-            Object.values(toneRules).filter(Boolean).forEach(rule => prompt += `- ${rule}\n`);
-            // prompt += `\nPost:\n"${postData}"\nAuthor: ${postAuthor}`;
+            const toneRules = {
+              commentsLength: commentsLength && `Keep comments about ${commentsLength} characters long.`,
+              formalityLevel: formalityLevel && `Use a ${formalityLevel} tone.`,
+              personality: personality && `Reflect a ${personality} personality.`,
+              questionsFrequency: questionsFrequency && `Include questions with a frequency of ${questionsFrequency}.`,
+              tone: tone && `Use a ${tone} tone.`,
+              gender: gender && `Consider me as a ${gender}.`
+            };
 
-            prompt += `
-            some examples of real humans comment below
+            let rules = "Write a human-like comment and follow the rules below:\n Keep under 200 characters";
 
-            "I would like to see what you 'bro-ing out' on us would look like."
-            -------
-            I do wonder if teleportation will ever be a thing.
-            Morning sprint + Posting spring + Evening sprint.
-            -------
-            3 times I log in daily. And it's more than enough!
-            "You can’t outgrow the limits of your own self-perception"
-            -------
-            OK, WOW. 🔥
+            let index = 1;
+            enabledCommentSettings.forEach(setting => {
+              if (settingRules[setting]) {
+                rules += `\n${index++}. ${settingRules[setting]}`;
+              }
+            });
+            Object.values(toneRules).forEach(rule => {
+              if (rule) {
+                rules += `\n${index++}. ${rule}`;
+              }
+            });
 
-            Post Author = "${postAuthor}"
-            Post Content
-            "${postData}"
-            `;
+            rules +=
+              `\nsome examples of real humans comment below
 
-            console.log("prompt:", prompt);
+
+              "I would like to see what you "bro-ing out" on us would look like. 
+              -------
+              I do wonder if teleportation will ever be a thing.
+              Morning sprint + Posting spring + Evening sprint.
+              -------
+              3 times I log in daily. And it's more than enough!
+              "You can’t outgrow the limits of your own self-perception"
+              -------
+              OK, WOW. 🔥
+              ...
+              Post Author = "${postAuthor}"
+              Post Content
+              "${postData}"
+              `;
+
+            console.log("rules:", rules);
 
             const response = await ai.models.generateContent({
               model: "gemini-2.5-flash",
-              contents: prompt,
+              contents: rules,
             });
 
             const commentText = response?.text
             console.log("🚀 ~ jobs ~ commentText:", commentText)
 
-            // Replace this with your actual AI call
-            // const commentText = "Nice post! 👏";
-
             const commentBox = 'div.ql-editor[contenteditable="true"]';
             const commentButton = 'button.comments-comment-box__submit-button--cr';
 
-            await page.waitForSelector(commentBox, { timeout: 10000 });
-            await page.click(commentBox);
-            await page.type(commentBox, commentText);
-            await page.waitForSelector(commentButton, { visible: true });
-            await page.click(commentButton);
+            const shouldMentionAuthor = enabledCommentSettings.includes('author');
 
+            if (!shouldMentionAuthor) {
+              // 🔹 Post simple comment without mention
+              await page.waitForSelector(commentBox, { state: 'visible' });
+              await page.click(commentBox);
+              await page.type(commentBox, commentText);
+              await page.waitForSelector(commentButton, { state: 'visible' });
+              await page.click(commentButton);
+              continue;
+            } else {
+              // 🔹 Try to detect and mention author in the comment
+              const mentionRegex = /@(?:[A-Za-z0-9.\-]+(?:\s+[A-Za-z0-9.\-]+){0,9})/;
+              const mentionMatch = commentText.match(mentionRegex);
+              let beforeMention = commentText;
+              let mentionTrigger = "";
+              let afterMention = "";
+              if (mentionMatch) {
+                const fullMention = mentionMatch[0]; // e.g., "@Ravi Kumar"
+                const mentionIndex = commentText.indexOf(fullMention);
+
+                beforeMention = commentText.slice(0, mentionIndex);
+                mentionTrigger = fullMention; // use full name trigger
+                afterMention = commentText.slice(mentionIndex + fullMention.length);
+              }
+              // 1. Focus the comment box
+              await page.waitForSelector(commentBox, { state: 'visible' });
+              const commentBoxHandle = await page.$(commentBox);
+              await commentBoxHandle.click();
+              // 2. Type only up to @mention
+              await page.keyboard.type(beforeMention);
+              // 3. Type the full @mention (e.g., @Ravi Kumar)
+              await page.keyboard.type(mentionTrigger);
+              // 4. Wait for LinkedIn dropdown
+              await page.waitForTimeout(1500);
+              // 5. Move mouse to dropdown suggestion and click
+              const box = await commentBoxHandle.boundingBox();
+              if (box) {
+                const x = box.x + box.width / 2;
+                const y = box.y + box.height + 25; // slightly lower for dropdown
+                await page.mouse.move(x, y);
+                await page.mouse.click(x, y);
+                await page.waitForTimeout(500); // wait for mention to be inserted
+              }
+              // 6. Type the rest of the comment
+              await page.keyboard.type(afterMention);
+              // 7. Click comment button
+              await page.waitForSelector(commentButton, { state: 'visible' });
+              await page.click(commentButton);
+              console.log("✅ Comment posted with full name mention.");
+            }
             console.log("✅ Comment posted");
             await CommentDetail.updateOne({ postUrl }, { $set: { comment: commentText, status: 'commented' } });
 
