@@ -1674,7 +1674,7 @@ cron.schedule('* * * * *', async () => {
 async function cronJobToGetRecentPostsMultiTab() {
   try {
     const pLimit = (await import('p-limit')).default;
-    const limit = pLimit(5); // Control concurrency
+    const limit = pLimit(3); // Control concurrency
 
     const users = await User.find({ role: { $ne: 'admin' } });
 
