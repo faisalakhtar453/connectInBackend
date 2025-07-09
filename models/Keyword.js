@@ -2,7 +2,8 @@ const mongoose = require('mongoose');
 
 const Keyword = new mongoose.Schema({
     userid: { type: String, required: true, },
-    keyword: { type: String },
+    linkedAccountId: { type: String, required: true, },
+    keyword: { type: Array },
     status: { type: String },
 }, { timestamps: true });
 

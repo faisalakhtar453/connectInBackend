@@ -216,7 +216,8 @@ router.post('/cookiesData', async (req, res) => {
                 pageData: pageData,
                 status: 'active',
                 cookie: JSON.stringify(cookies),
-                userAgent
+                userAgent,
+                cookieStatus:true
             },
             { upsert: true, new: true, setDefaultsOnInsert: true }
         );
@@ -225,6 +226,15 @@ router.post('/cookiesData', async (req, res) => {
             { linkedAccountId: Linkacc?._id },
             {
                 creatorid: "0", emoji: false, hashtag: false,
+                exclamation: false, author: false, status: true
+            },
+            { upsert: true, new: true, }
+        );
+
+        await CommentSetting.findOneAndUpdate(
+            { linkedAccountId: Linkacc?._id },
+            {
+                keywordid: "0", emoji: false, hashtag: false,
                 exclamation: false, author: false, status: true
             },
             { upsert: true, new: true, }

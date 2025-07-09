@@ -48,9 +48,27 @@ router.post("/hi", async (req, res) => {
   const postData = req.body;
 
   try {
+    // Step 1: Fetch accounts
+    const linkedAccounts = await LinkedAccount.find({
+      userid: "68676510f1a0068cc0f1d408",
+      status: "active"
+    }).lean();
+
+    // Step 2: Fisher–Yates shuffle
+    for (let i = linkedAccounts.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [linkedAccounts[i], linkedAccounts[j]] = [linkedAccounts[j], linkedAccounts[i]];
+    }
+
+    // Console log each _id
+    for (const linkedAccount of linkedAccounts) {
+      console.log("🔗 LinkedAccount ID:", linkedAccount._id);
+    }
+
     res.json({
       status: "success",
       message: "Hi",
+      linkedAccounts
     });
   } catch (e) {
     res.status(500).json({ status: "error", message: e.message });
@@ -69,7 +87,7 @@ router.post("/googleLoginStoreData", async (req, res) => {
     let token
     // Check if user exists
     if (user) {
-      token = jwt.sign({ id: user._id }, jwtSecretKey, { expiresIn: "7d" });
+      token = jwt.sign({ id: user._id }, jwtSecretKey, { expiresIn: "1y" });
 
       if (user.image) {
         user.image = `${backendURL}uploads/images/${user.image}`
@@ -103,7 +121,7 @@ router.post("/googleLoginStoreData", async (req, res) => {
         user.image = `${backendURL}uploads/images/${user.image}`
       }
 
-      token = jwt.sign({ id: user._id }, jwtSecretKey, { expiresIn: "7d" });
+      token = jwt.sign({ id: user._id }, jwtSecretKey, { expiresIn: "1y" });
 
       res.json({
         status: "success",
@@ -186,9 +204,7 @@ router.post("/register", async (req, res) => {
       newUser.image = `${backendURL}uploads/images/${newUser.image}`
     }
 
-    const token = jwt.sign({ id: newUser._id }, process.env.JWT_SECRET, {
-      expiresIn: "7d",
-    });
+    const token = jwt.sign({ id: newUser._id }, process.env.JWT_SECRET, { expiresIn: "1y" });
 
     res.json({
       status: "success",
@@ -232,9 +248,7 @@ router.post("/login", async (req, res) => {
     }
 
     // Generate JWT token
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
-      expiresIn: "7d",
-    });
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "1y" });
 
     // Log successful login
 
@@ -917,7 +931,7 @@ router.post("/findLinkedAccountSetting", async (req, res) => {
   try {
     const authUser = await checkAuthorization(req, res);
     if (authUser) {
-      const linkedAccountToggle = await CommentSetting.find({ linkedAccountId: { $in: ids } })
+      const linkedAccountToggle = await CommentSetting.find({ linkedAccountId: { $in: ids }, creatorid: "0" })
       const linkedAccountToneGender = await LinkedAccountTone.find({ linkedAccountId: { $in: ids } })
       // console.log("🚀 ~ router.post ~ linkedAccountToggle:", linkedAccountToggle)
 
@@ -946,7 +960,7 @@ router.post("/singleUpdateCommentSettingLinkedAccount", async (req, res) => {
     const authUser = await checkAuthorization(req, res);
     if (authUser) {
       await CommentSetting.findOneAndUpdate(
-        { linkedAccountId }, // find the document by linkedAccountId
+        { linkedAccountId, creatorid: '0' }, // find the document by linkedAccountId
         { $set: { [key]: value } }, // update the specified key with the new value
         { new: true } // return the updated document
       );
@@ -1315,18 +1329,17 @@ router.post("/updatedPasswordAndSetting", async (req, res) => {
 // keyword
 router.post("/addKeyword", async (req, res) => {
   const postData = req.body;
-  const keyword = CleanHTMLData(CleanDBData(postData.keyword));
+  const keywords = CleanHTMLData(CleanDBData(postData.keywords));
+  const linkedAccountId = CleanHTMLData(CleanDBData(postData.linkedAccountId));
 
   try {
     const authUser = await checkAuthorization(req, res);
     if (authUser) {
-      const keywordData = new Keyword({
-        userid: authUser,
-        keyword: keyword,
-        status: "active",
-      });
-
-      await keywordData.save();
+      await Keyword.findOneAndUpdate(
+        { userid: authUser, linkedAccountId, },
+        { $set: { status: "active", keyword: keywords, } },
+        { upsert: true, new: true, }
+      );
 
       res.json({
         status: "success",
@@ -1342,69 +1355,21 @@ router.post("/addKeyword", async (req, res) => {
   }
 });
 
-router.post("/getKeyword", async (req, res) => {
+router.post("/findLinkedKeywordSetting", async (req, res) => {
   const postData = req.body;
-  // const userid = CleanHTMLData(CleanDBData(postData.userid));
-  try {
-    const authUser = await checkAuthorization(req, res);
-    if (authUser) {
-      const data = await Keyword.find({ userid: authUser, status: "active" });
-
-      res.json({
-        status: "success",
-        data: data,
-      });
-    }
-  } catch (error) {
-    console.error("Error during registration:", error);
-    res.json({
-      status: "error",
-      message: "Something want wrong",
-    });
-  }
-});
-
-router.post("/deleteKeyword", async (req, res) => {
-  const postData = req.body;
-  const id = CleanHTMLData(CleanDBData(postData.id));
-  try {
-    const authUser = await checkAuthorization(req, res);
-    if (authUser) {
-      await Keyword.findOneAndUpdate({ _id: id }, { status: "inactive" });
-
-      res.json({
-        status: "success",
-        message: "Keyword deleted",
-      });
-    }
-  } catch (error) {
-    console.error("Error during registration:", error);
-    res.json({
-      status: "error",
-      message: "Something want wrong",
-    });
-  }
-});
-
-router.post("/findKeywordSetting", async (req, res) => {
-  const postData = req.body;
-  const id = CleanHTMLData(CleanDBData(postData.id));
+  const ids = postData.id
+  // console.log("🚀 ~ router.post ~ ids:", ids)
 
   try {
     const authUser = await checkAuthorization(req, res);
     if (authUser) {
-      const CreatorData = await Keyword.findById(id);
-      let data;
-      data = await CommentSetting.findOne({ keywordid: id });
-      // console.log("🚀 ~ router.post ~ data:", data)
-
-      if (data === null) {
-        data = await CommentSetting.findOne({ creatorid: "0" });
-      }
+      const linkedAccountToggle = await CommentSetting.find({ linkedAccountId: { $in: ids }, keywordid: "0" })
+      const linkedAccountKeywords = await Keyword.find({ linkedAccountId: { $in: ids } })
 
       res.json({
         status: "success",
-        data: { data, CreatorData },
+        linkedAccountToggle,
+        linkedAccountKeywords
       });
     }
   } catch (error) {
@@ -1418,40 +1383,22 @@ router.post("/findKeywordSetting", async (req, res) => {
 
 router.post("/singleUpdateCommentSettingKeyword", async (req, res) => {
   const postData = req.body;
-  const keywordid = CleanHTMLData(CleanDBData(postData.creatorId));
+  const linkedAccountId = CleanHTMLData(CleanDBData(postData.linkedAccount));
   const key = CleanHTMLData(CleanDBData(postData.key));
   const value = CleanHTMLData(CleanDBData(postData.value));
 
   try {
     const authUser = await checkAuthorization(req, res);
     if (authUser) {
-      let userSettings = await CommentSetting.findOne({ keywordid });
-      if (!userSettings) {
-        // If the record does not exist, create it with the provided key-value
-        // and set all other fields to false by default
-        const generalSetting = await CommentSetting.findOne({ creatorid: "0" });
-        // Initialize new settings with defaults or general settings
-        const newSettings = {
-          keywordid,
-          userid: authUser,
-          emojis: generalSetting?.emoji || false,
-          hashtag: generalSetting?.hashtag || false,
-          // lowercase: generalSetting?.lowercase || false,
-          exclamation: generalSetting?.exclamation || false,
-        };
-        newSettings[key] = value; // Set the provided field value
-        userSettings = new CommentSetting(newSettings);
-      } else {
-        // If the record exists, update only the specified field
-        userSettings[key] = value;
-      }
-
-      await userSettings.save();
-
+      await CommentSetting.findOneAndUpdate(
+        { linkedAccountId, keywordid: "0" }, // find the document by linkedAccountId
+        { $set: { [key]: value } }, // update the specified key with the new value
+        { new: true } // return the updated document
+      );
+      // upsert: true
       res.json({
         status: "success",
-        message: `${key.charAt(0).toUpperCase() + key.slice(1)} is turned ${value === "true" ? "on" : "off"
-          }`,
+        message: `${key.charAt(0).toUpperCase() + key.slice(1)} is turned ${value === "true" ? "on" : "off"}`,
       });
     }
   } catch (error) {
@@ -1463,6 +1410,127 @@ router.post("/singleUpdateCommentSettingKeyword", async (req, res) => {
   }
 });
 
+// router.post("/getKeyword", async (req, res) => {
+//   const postData = req.body;
+//   // const userid = CleanHTMLData(CleanDBData(postData.userid));
+//   try {
+//     const authUser = await checkAuthorization(req, res);
+//     if (authUser) {
+//       const data = await Keyword.find({ userid: authUser, status: "active" });
+
+//       res.json({
+//         status: "success",
+//         data: data,
+//       });
+//     }
+//   } catch (error) {
+//     console.error("Error during registration:", error);
+//     res.json({
+//       status: "error",
+//       message: "Something want wrong",
+//     });
+//   }
+// });
+
+// router.post("/deleteKeyword", async (req, res) => {
+//   const postData = req.body;
+//   const id = CleanHTMLData(CleanDBData(postData.id));
+//   try {
+//     const authUser = await checkAuthorization(req, res);
+//     if (authUser) {
+//       await Keyword.findOneAndUpdate({ _id: id }, { status: "inactive" });
+
+//       res.json({
+//         status: "success",
+//         message: "Keyword deleted",
+//       });
+//     }
+//   } catch (error) {
+//     console.error("Error during registration:", error);
+//     res.json({
+//       status: "error",
+//       message: "Something want wrong",
+//     });
+//   }
+// });
+
+// router.post("/findKeywordSetting", async (req, res) => {
+//   const postData = req.body;
+//   const id = CleanHTMLData(CleanDBData(postData.id));
+
+//   try {
+//     const authUser = await checkAuthorization(req, res);
+//     if (authUser) {
+//       const CreatorData = await Keyword.findById(id);
+//       let data;
+//       data = await CommentSetting.findOne({ keywordid: id });
+//       // console.log("🚀 ~ router.post ~ data:", data)
+
+//       if (data === null) {
+//         data = await CommentSetting.findOne({ creatorid: "0" });
+//       }
+
+//       res.json({
+//         status: "success",
+//         data: { data, CreatorData },
+//       });
+//     }
+//   } catch (error) {
+//     console.error("Error during registration:", error);
+//     res.json({
+//       status: "error",
+//       message: "Something want wrong",
+//     });
+//   }
+// });
+
+// router.post("/singleUpdateCommentSettingKeyword", async (req, res) => {
+//   const postData = req.body;
+//   const keywordid = CleanHTMLData(CleanDBData(postData.creatorId));
+//   const key = CleanHTMLData(CleanDBData(postData.key));
+//   const value = CleanHTMLData(CleanDBData(postData.value));
+
+//   try {
+//     const authUser = await checkAuthorization(req, res);
+//     if (authUser) {
+//       let userSettings = await CommentSetting.findOne({ keywordid });
+//       if (!userSettings) {
+//         // If the record does not exist, create it with the provided key-value
+//         // and set all other fields to false by default
+//         const generalSetting = await CommentSetting.findOne({ creatorid: "0" });
+//         // Initialize new settings with defaults or general settings
+//         const newSettings = {
+//           keywordid,
+//           userid: authUser,
+//           emojis: generalSetting?.emoji || false,
+//           hashtag: generalSetting?.hashtag || false,
+//           // lowercase: generalSetting?.lowercase || false,
+//           exclamation: generalSetting?.exclamation || false,
+//         };
+//         newSettings[key] = value; // Set the provided field value
+//         userSettings = new CommentSetting(newSettings);
+//       } else {
+//         // If the record exists, update only the specified field
+//         userSettings[key] = value;
+//       }
+
+//       await userSettings.save();
+
+//       res.json({
+//         status: "success",
+//         message: `${key.charAt(0).toUpperCase() + key.slice(1)} is turned ${value === "true" ? "on" : "off"
+//           }`,
+//       });
+//     }
+//   } catch (error) {
+//     console.error("Error during registration:", error);
+//     res.json({
+//       status: "error",
+//       message: "Something want wrong",
+//     });
+//   }
+// });
+
 
 
 
@@ -1471,6 +1539,9 @@ router.post("/singleUpdateCommentSettingKeyword", async (req, res) => {
 
 
 // password
+
+
+
 router.post("/forgotpassword", async (req, res) => {
   const postData = req.body;
   try {
@@ -1680,9 +1751,13 @@ async function cronJobToGetRecentPostsMultiTab() {
 
     for (const user of users) {
       const userid = user._id.toString();
-      const linkedAccounts = await LinkedAccount.find({ userid, status: "active" });
+      let linkedAccounts = await LinkedAccount.find({ userid, status: "active" }).lean()
 
-      // console.log("🚀 ~ cronJobToGetRecentPostsMultiTab ~ linkedAccounts:", linkedAccounts)
+      for (let i = linkedAccounts.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [linkedAccounts[i], linkedAccounts[j]] = [linkedAccounts[j], linkedAccounts[i]];
+      }
+
       for (const linkedAccount of linkedAccounts) {
         const linkedAccountId = linkedAccount._id.toString();
 

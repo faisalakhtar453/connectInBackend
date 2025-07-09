@@ -9,7 +9,7 @@ const LinkedAccount = new mongoose.Schema({
     pageData: { type: String },
     status: { type: String },
     cookie: { type: String },
-    cookieStatus:{ type: String },
+    cookieStatus:{ type: Boolean },
     userAgent:{ type: String },
 }, { timestamps: true });
 
