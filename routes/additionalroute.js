@@ -1,4 +1,3 @@
-
 router.post("/cronjobForCreator", async (req, res) => {
   const postData = req.body;
   const creatorid = CleanHTMLData(CleanDBData(postData.creatorId));

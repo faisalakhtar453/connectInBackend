@@ -1836,6 +1836,7 @@ cron.schedule('* * * * *', async () => {
   // cron.schedule('* 8-10,12-14 * * 1-5', async () => {
   // console.log('Running cron job during allowed hours, Mon–Fri');
   // await cronJobToCommentRecentPostsFromDbMultiBrowser();
+  await cronJobToKeywordPostsFromDbMultiBrowser()
 });
 
 async function cronJobToCommentRecentPostsFromDbMultiBrowser() {
@@ -1860,7 +1861,7 @@ async function cronJobToCommentRecentPostsFromDbMultiBrowser() {
       const userid = userGroup[0][0]?.userid
       const user = await User.findById(userid);
       const packageid = user?.packageid
-      const packageDetail = await PackageDetail.findOne({ toPlanId: packageid })
+      const packageDetail = await PackageDetail.findOne({ toPlanId: packageid, userid })
       const expDate = packageDetail?.expireDate
 
       const expireDate = new Date(expDate);
@@ -2137,6 +2138,341 @@ async function cronJobToCommentRecentPostsFromDbMultiBrowser() {
             console.error("❌ Error on post:", postUrl, e.message);
           }
         }
+      }
+
+      await context.close();
+    }));
+
+    await Promise.all(jobs);
+  } catch (err) {
+    console.error("❌ Error in cron job:", err);
+  }
+}
+
+async function cronJobToKeywordPostsFromDbMultiBrowser() {
+  try {
+    const pLimit = (await import('p-limit')).default;
+    const limit = pLimit(3); // max 3 tabs at once
+
+    let linkedAccounts = await LinkedAccount.find({ status: "active" }).lean()
+
+    for (let i = linkedAccounts.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [linkedAccounts[i], linkedAccounts[j]] = [linkedAccounts[j], linkedAccounts[i]];
+    }
+
+
+    const jobs = linkedAccounts.map(linkedAccount => limit(async () => {
+      const linkedAccountId = linkedAccount?._id;
+      const userid = linkedAccount?.userid
+      const user = await User.findById(userid);
+      const packageid = user?.packageid
+      const packageDetail = await PackageDetail.findOne({ toPlanId: packageid, userid })
+      const expDate = packageDetail?.expireDate
+
+      const expireDate = new Date(expDate);
+      const now = new Date();
+      const isExpired = expireDate < now;
+
+      if (isExpired == true) {
+        return
+      }
+
+      const cookies = JSON.parse(linkedAccount?.cookie);
+      const userAgent = linkedAccount?.userAgent;
+
+      const userDir = path.resolve(__dirname, `../tmp/sessions-${linkedAccountId}`);
+      if (!fs.existsSync(userDir)) fs.mkdirSync(userDir, { recursive: true });
+
+
+      let browser, context, page;
+      let headless = false;
+      let args = ['--start-maximized', '--no-sandbox', '--disable-setuid-sandbox'];
+
+      context = await chromium.launchPersistentContext(userDir, {
+        headless,
+        args,
+        userAgent,
+        viewport: null,
+        // proxy,
+      });
+
+      if (context.pages().length) {
+        page = context.pages()[0];
+      } else {
+        page = await context.newPage();
+      }
+      // await page.setUserAgent(userAgent);
+      page.setDefaultTimeout(60000); // changes default for all waits
+
+      // --- Stealth Injection ---
+      await context.addInitScript(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => false });
+        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+
+        // Battery spoof
+        navigator.getBattery = async () => ({
+          charging: true,
+          level: 1,
+          chargingTime: 0,
+          dischargingTime: Infinity
+        });
+
+        // Touch support
+        navigator.maxTouchPoints = 1;
+
+        const originalQuery = window.navigator.permissions.query;
+        window.navigator.permissions.query = (parameters) =>
+          parameters.name === 'notifications'
+            ? Promise.resolve({ state: Notification.permission })
+            : originalQuery(parameters);
+
+        const getParameter = WebGLRenderingContext.prototype.getParameter;
+        WebGLRenderingContext.prototype.getParameter = function (parameter) {
+          if (parameter === 37445) return "Intel Inc.";
+          if (parameter === 37446) return "Intel Iris OpenGL Engine";
+          return getParameter.call(this, parameter);
+        };
+
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const copy = audioContext.createAnalyser;
+        audioContext.createAnalyser = function () {
+          const analyser = copy.call(this);
+          analyser.getFloatFrequencyData = function () { };
+          return analyser;
+        };
+      });
+
+
+      await page.goto('https://www.linkedin.com/feed/', { waitUntil: 'domcontentloaded' });
+
+      let isLoggedIn = await page.$('img.global-nav__me-photo');
+
+      if (!isLoggedIn) {
+        console.log(`🔐 Not logged in yet, trying cookie for ${user.email}`);
+
+        const sanitizedCookies = cookies
+          .filter(cookie => cookie.name && cookie.value && cookie.domain)
+          .map(cookie => ({
+            name: cookie.name,
+            value: cookie.value,
+            domain: cookie.domain,
+            path: cookie.path || '/',
+            secure: cookie.secure !== undefined ? cookie.secure : true,
+            httpOnly: cookie.httpOnly !== undefined ? cookie.httpOnly : true,
+            expires: typeof cookie.expirationDate === 'number' ? cookie.expirationDate : undefined
+          }));
+
+        if (!sanitizedCookies.length) {
+          throw new Error("No valid cookies found");
+        }
+
+        await context.clearCookies(); // prevent old login conflicts
+        await context.addCookies(sanitizedCookies);
+
+        await page.goto('https://www.linkedin.com/feed/', { waitUntil: 'domcontentloaded' });
+        await page.waitForTimeout(2000);
+        isLoggedIn = await page.$('img.global-nav__me-photo');
+      }
+
+      if (!isLoggedIn) {
+        console.log(`❌ Cookie failed for ${user.email}`);
+        await LinkedAccount.findByIdAndUpdate(linkedAccountId, { cookieStatus: false });
+        await context.close();
+        return;
+      }
+
+      console.log(`✅ Logged in as ${user.email} using cookie`);
+
+
+      try {
+        const keywordTag = await Keyword.findOne({ linkedAccountId, status: "active" })
+
+        if (!keywordTag.keyword || keywordTag.keyword.length === 0) {
+          return
+        }
+        // Split the first string in the array into separate keywords
+        const keywords = keywordTag.keyword[0].split(',');
+
+        // Pick a random keyword
+        let randomKeyword = keywords[Math.floor(Math.random() * keywords.length)];
+
+        console.log("Random Keyword:", randomKeyword);
+
+        // const inputSelector = 'input.search-global-typeahead__input';
+        // const commentBoxSelector = 'div.ql-editor[contenteditable="true"]';
+        // const commentButtonSelector = 'button.comments-comment-box__submit-button--cr';
+
+        const encodedKeyword = encodeURIComponent(randomKeyword);
+        const keywordUrl = `https://www.linkedin.com/search/results/content/?datePosted=%22past-24h%22&keywords=${encodedKeyword}&origin=FACETED_SEARCH&sortBy=%22relevance%22`;
+
+        await page.goto(keywordUrl, { waitUntil: 'networkidle' });
+
+        // Wait for posts to load
+        await page.waitForSelector('main', { visible: true });
+        await page.waitForSelector('ul[role="list"] li.artdeco-card', { visible: true });
+
+        const urns = await page.$$eval('ul[role="list"] li', listItems =>
+          listItems.map(li => {
+            const el = li.querySelector('[data-urn]');
+            return el?.getAttribute('data-urn') || null;
+          }).filter(Boolean)
+        );
+
+        console.log('Scoped URNs:', urns[0]);
+
+        const postUrl = `https://www.linkedin.com/feed/update/${urns[0]}`
+        console.log("postUrl", postUrl)
+
+        await page.goto(postUrl, { waitUntil: 'load' });
+        await delay(2000);
+
+        const postContentExists = await page.$("div.update-components-text.update-components-update-v2__commentary");
+        if (!postContentExists) {
+          await CommentDetail.updateOne({ postUrl }, {
+            $set: { comment: 'Post inaccessible or deleted', status: 'commented' }
+          });
+          return;
+        }
+
+        const { postData, postAuthor } = await page.evaluate(() => ({
+          postData: document.querySelector("div.update-components-text.update-components-update-v2__commentary")?.textContent.trim() || "No post found",
+          postAuthor: document.querySelector(".update-components-actor__title span[aria-hidden='true']")?.textContent.trim() || "Author not found",
+        }));
+
+        console.log("📄 PostData:", postData);
+        console.log("👤 Author:", postAuthor);
+
+        // Load comment settings and tone
+        const commentSetting = await CommentSetting.findOne({ linkedAccountId, keywordid: '0' })
+
+        const enabledCommentSettings = ["emoji", "hashtag", "exclamation", "author"]
+          .filter(s => commentSetting?.[s]);
+
+        const linkedAccountTone = await LinkedAccountTone.findOne({ linkedAccountId });
+        const { commentsLength, formalityLevel, personality, questionsFrequency, tone, gender } = linkedAccountTone || {};
+
+        const settingRules = {
+          emoji: "Turn on emojis and use 1 or 2.",
+          hashtag: "Turn on hashtags and use 1 or 2.",
+          exclamation: "Use exclamation marks where necessary.",
+          author: "Tag the post author.",
+        };
+
+        const toneRules = {
+          commentsLength: commentsLength && `Keep comments about ${commentsLength} characters long.`,
+          formalityLevel: formalityLevel && `Use a ${formalityLevel} tone.`,
+          personality: personality && `Reflect a ${personality} personality.`,
+          questionsFrequency: questionsFrequency && `Include questions with a frequency of ${questionsFrequency}.`,
+          tone: tone && `Use a ${tone} tone.`,
+          gender: gender && `Consider me as a ${gender}.`
+        };
+
+        let rules = "Write a human-like comment and follow the rules below:\n Keep under 200 characters";
+
+        let index = 1;
+        enabledCommentSettings.forEach(setting => {
+          if (settingRules[setting]) {
+            rules += `\n${index++}. ${settingRules[setting]}`;
+          }
+        });
+        Object.values(toneRules).forEach(rule => {
+          if (rule) {
+            rules += `\n${index++}. ${rule}`;
+          }
+        });
+
+        rules +=
+          `\nsome examples of real humans comment below
+
+
+              "I would like to see what you "bro-ing out" on us would look like. 
+              -------
+              I do wonder if teleportation will ever be a thing.
+              Morning sprint + Posting spring + Evening sprint.
+              -------
+              3 times I log in daily. And it's more than enough!
+              "You can’t outgrow the limits of your own self-perception"
+              -------
+              OK, WOW. 🔥
+              ...
+              Post Author = "${postAuthor}"
+              Post Content
+              "${postData}"
+              `;
+
+        console.log("rules:", rules);
+
+        const response = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: rules,
+        });
+
+        const commentText = response?.text
+        console.log("🚀 ~ jobs ~ commentText:", commentText)
+
+        const commentBox = 'div.ql-editor[contenteditable="true"]';
+        const commentButton = 'button.comments-comment-box__submit-button--cr';
+
+        const shouldMentionAuthor = enabledCommentSettings.includes('author');
+
+        if (!shouldMentionAuthor) {
+          // 🔹 Post simple comment without mention
+          await page.waitForSelector(commentBox, { state: 'visible' });
+          await page.click(commentBox);
+          await page.type(commentBox, commentText);
+          await page.waitForSelector(commentButton, { state: 'visible' });
+          await page.click(commentButton);
+          return;
+        } else {
+          // 🔹 Try to detect and mention author in the comment
+          const mentionRegex = /@(?:[A-Za-z0-9.\-]+(?:\s+[A-Za-z0-9.\-]+){0,9})/;
+          const mentionMatch = commentText.match(mentionRegex);
+          let beforeMention = commentText;
+          let mentionTrigger = "";
+          let afterMention = "";
+          if (mentionMatch) {
+            const fullMention = mentionMatch[0]; // e.g., "@Ravi Kumar"
+            const mentionIndex = commentText.indexOf(fullMention);
+
+            beforeMention = commentText.slice(0, mentionIndex);
+            mentionTrigger = fullMention; // use full name trigger
+            afterMention = commentText.slice(mentionIndex + fullMention.length);
+          }
+          // 1. Focus the comment box
+          await page.waitForSelector(commentBox, { state: 'visible' });
+          const commentBoxHandle = await page.$(commentBox);
+          await commentBoxHandle.click();
+          // 2. Type only up to @mention
+          await page.keyboard.type(beforeMention);
+          // 3. Type the full @mention (e.g., @Ravi Kumar)
+          await page.keyboard.type(mentionTrigger);
+          // 4. Wait for LinkedIn dropdown
+          await page.waitForTimeout(1500);
+          // 5. Move mouse to dropdown suggestion and click
+          const box = await commentBoxHandle.boundingBox();
+          if (box) {
+            const x = box.x + box.width / 2;
+            const y = box.y + box.height + 25; // slightly lower for dropdown
+            await page.mouse.move(x, y);
+            await page.mouse.click(x, y);
+            await page.waitForTimeout(500); // wait for mention to be inserted
+          }
+          // 6. Type the rest of the comment
+          await page.keyboard.type(afterMention);
+          // 7. Click comment button
+          await page.waitForSelector(commentButton, { state: 'visible' });
+          await page.click(commentButton);
+          console.log("✅ Comment posted with full name mention.");
+        }
+        console.log("✅ Comment posted");
+        // await CommentDetail.updateOne({ postUrl }, { $set: { comment: commentText, status: 'commented' } });
+        await CommentDetail.create({ postUrl, comment: commentText, status: 'commented', keywordid: keywordTag?._id });
+
+        await delay(3000);
+      } catch (e) {
+        console.error("❌ Error on post:", e);
       }
 
       await context.close();
