@@ -12,6 +12,7 @@ const Package = new mongoose.Schema({
     bothActive: { type: Boolean },
     status: { type: String },
     type: { type: String },
+    keywordLimit: { type: String },
 }, { timestamps: true });
 
 module.exports = mongoose.model('Package', Package);

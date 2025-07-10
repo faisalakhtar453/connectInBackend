@@ -5,6 +5,7 @@ const Keyword = new mongoose.Schema({
     linkedAccountId: { type: String, required: true, },
     keyword: { type: Array },
     status: { type: String },
+    lastScrapedAt: { type: String },
 }, { timestamps: true });
 
 module.exports = mongoose.model('Keyword', Keyword);
