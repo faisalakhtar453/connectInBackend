@@ -23,8 +23,8 @@ app.use("/uploads", express.static("uploads"));
 const allowedOrigins = [
   'http://localhost:3000',
   'https://connect-in-iota.vercel.app',
-  'https://connect-fl4kci5fl-faisals-projects-b859655a.vercel.app',
-  'https://ed8585a71150.ngrok-free.app', // ← your current ngrok frontend URL
+  'https://connect-1v8je0a8c-faisals-projects-b859655a.vercel.app',
+  'https://86d346107484.ngrok-free.app', // ← your current ngrok frontend URL
 ];
 
 app.use(cors({

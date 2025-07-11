@@ -1418,7 +1418,7 @@ router.post("/keywordCommentDetail", async (req, res) => {
   try {
     const authUser = await checkAuthorization(req, res);
     if (authUser) {
-      const keyword = await Keyword.findOne({ userid: authUser })
+      const keyword = await Keyword.find({ userid: authUser })
       const data = await CommentDetail.find({ userid: authUser, keywordid: keyword?._id });
 
       const enrichedData = await Promise.all(
@@ -1774,7 +1774,7 @@ router.post('/linked-account-tone-one-time', async (req, res) => {
 // cron.schedule('*/30 * * * *', async () => {
 //   console.log('Running cron job every 30 min');
 cron.schedule('* * * * *', async () => {
-  // console.log('Running cron job every 1 min');
+  console.log('Running cron job every 1 min');
   // await cronJobToGetRecentPostsMultiTab();
 });
 
@@ -1782,18 +1782,15 @@ cron.schedule('* * * * *', async () => {
 async function cronJobToGetRecentPostsMultiTab() {
   try {
     const pLimit = (await import('p-limit')).default;
-    const limit = pLimit(3); // Control concurrency
+    const limit = pLimit(10); // Control concurrency
 
     const users = await User.find({ role: { $ne: 'admin' } });
 
     for (const user of users) {
       const userid = user._id.toString();
-      let linkedAccounts = await LinkedAccount.find({ userid, status: "active" }).lean()
+      const linkedAccounts = await LinkedAccount.find({ userid, status: "active" }).lean()
 
-      for (let i = linkedAccounts.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [linkedAccounts[i], linkedAccounts[j]] = [linkedAccounts[j], linkedAccounts[i]];
-      }
+      // console.log("🚀 ~ cronJobToGetRecentPostsMultiTab ~ linkedAccounts:", linkedAccounts.length)
 
       for (const linkedAccount of linkedAccounts) {
         const linkedAccountId = linkedAccount._id.toString();
@@ -1804,11 +1801,17 @@ async function cronJobToGetRecentPostsMultiTab() {
           linkedAccountId,
           status: "active",
           lastScrapedAt: { $lt: twentyFourHoursAgoISOString }
-        });
+        }).lean();
 
-        console.log("🚀 ~ cronJobToGetRecentPostsMultiTab ~ creators:", creators);
+        // Shuffle the creators array
+        for (let i = creators.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [creators[i], creators[j]] = [creators[j], creators[i]];
+        }
 
         if (creators.length === 0) continue;
+
+        console.log("🚀 ~ cronJobToGetRecentPostsMultiTab ~ creators:", creators.length, "userid", userid, "linkedAccountId", linkedAccountId)
 
         // Only update those that were actually scraped successfully
         const tasks = creators.map(creator =>
@@ -1824,14 +1827,14 @@ async function cronJobToGetRecentPostsMultiTab() {
 }
 
 async function scrapeRecentPost({ creator, userid, linkedAccountId }) {
-  // let page;
+  let page;
   try {
     const profileUrl = creator.url;
     const creatorid = creator._id;
 
     page = await browser.newPage();
 
-    await page.goto(profileUrl, { waitUntil: "networkidle" });
+    await page.goto(profileUrl, { waitUntil: "domcontentloaded" });
 
     await page.waitForSelector("div.feed-shared-update-list-carousel", { state: 'visible' });
 
@@ -1870,8 +1873,8 @@ async function scrapeRecentPost({ creator, userid, linkedAccountId }) {
 }
 
 cron.schedule('* * * * *', async () => {
-  // cron.schedule('* 8-10,12-14 * * 1-5', async () => {
-  console.log('Running cron job during allowed hours, Mon–Fri');
+  // cron.schedule('*/5 9-18 * * *', async () => {
+  console.log('Running cron job during allowed hours');
   // await cronJobToCommentRecentPostsFromDbMultiBrowser();
   // await cronJobToKeywordPostsFromDbMultiBrowser()
 });
@@ -1882,31 +1885,39 @@ async function cronJobToCommentRecentPostsFromDbMultiBrowser() {
     const limit = pLimit(3); // max 3 tabs at once
     const postsData = await CommentDetail.find({ status: 'pending' });
 
-    // Group posts by user > account
-    const groupedByUser = postsData.reduce((acc, obj) => {
-      const { userid, linkedAccountId } = obj;
-      acc[userid] = acc[userid] || {};
-      acc[userid][linkedAccountId] = acc[userid][linkedAccountId] || [];
-      acc[userid][linkedAccountId].push(obj);
+    // Group by linkedAccountId
+    const groupedByAccount = postsData.reduce((acc, post) => {
+      const id = post.linkedAccountId;
+      if (!acc[id]) acc[id] = [];
+      acc[id].push(post);
       return acc;
     }, {});
-    const grouped3DArray = Object.values(groupedByUser).map(userGroup => Object.values(userGroup));
 
-    const jobs = grouped3DArray.map(userGroup => limit(async () => {
-      const linkedAccountId = userGroup[0][0]?.linkedAccountId;
+
+    const jobs = Object.entries(groupedByAccount).map(([linkedAccountId, posts]) => limit(async () => {
+
+      const firstPost = posts[0];
+      console.log("🚀 ~ jobs ~ firstPost:", firstPost)
+      const user = await User.findById(firstPost.userid);
       const linkedAccount = await LinkedAccount.findById(linkedAccountId);
-      const userid = userGroup[0][0]?.userid
-      const user = await User.findById(userid);
-      const packageid = user?.packageid
-      const packageDetail = await PackageDetail.findOne({ toPlanId: packageid, userid })
-      const expDate = packageDetail?.expireDate
 
-      const expireDate = new Date(expDate);
-      const now = new Date();
-      const isExpired = expireDate < now;
+      const packageDetail = await PackageDetail.findOne({
+        toPlanId: user.packageid,
+        userid: user._id,
+      });
 
-      if (isExpired == true) {
-        return
+      // const linkedAccountId = userGroup[0][0]?.linkedAccountId;
+      // const linkedAccount = await LinkedAccount.findById(linkedAccountId);
+      // const userid = userGroup[0][0]?.userid
+      // const user = await User.findById(userid);
+      // const packageid = user?.packageid
+      // const packageDetail = await PackageDetail.findOne({ toPlanId: packageid, userid })
+      // const expDate = packageDetail?.expireDate
+
+      const isExpired = new Date(packageDetail?.expireDate) < new Date();
+      if (isExpired) {
+        console.log(`⚠️ Skipping expired user: ${user.email}`);
+        return;
       }
 
       const cookies = JSON.parse(linkedAccount?.cookie);
@@ -2016,15 +2027,24 @@ async function cronJobToCommentRecentPostsFromDbMultiBrowser() {
 
       console.log(`✅ Logged in as ${user.email} using cookie`);
 
-      for (const linkedGroup of userGroup) {
-        for (const post of linkedGroup) {
-          const { postUrl, linkedAccountId, creatorid } = post;
+      // for (const linkedGroup of userGroup) {
+      //   for (const post of linkedGroup) {
+      // Loop through all posts for this linkedAccountId
+        for (const post of posts) {
+          const { postUrl, creatorid } = post;
           console.log(`📨 Navigating to: ${postUrl}`);
 
           try {
             // await delay(Math.floor(Math.random() * (15000 - 5000) + 5000));
             await page.goto(postUrl, { waitUntil: 'load' });
             await delay(2000);
+
+            //   const commentButton = 'button.comments-comment-box__submit-button--cr';
+            // const isDisabled = await page.$eval(commentButton, el => el.hasAttribute('disabled'));
+            // if (isDisabled) {
+            //   console.log('🚫 Comment button is disabled.');
+            //   await context.close();
+            // }
 
             const postContentExists = await page.$("div.update-components-text.update-components-update-v2__commentary");
             if (!postContentExists) {
@@ -2125,7 +2145,6 @@ async function cronJobToCommentRecentPostsFromDbMultiBrowser() {
               await page.type(commentBox, commentText);
               await page.waitForSelector(commentButton, { state: 'visible' });
               await page.click(commentButton);
-              continue;
             } else {
               // 🔹 Try to detect and mention author in the comment
               const mentionRegex = /@(?:[A-Za-z0-9.\-]+(?:\s+[A-Za-z0-9.\-]+){0,9})/;
@@ -2175,7 +2194,7 @@ async function cronJobToCommentRecentPostsFromDbMultiBrowser() {
             console.error("❌ Error on post:", postUrl, e.message);
           }
         }
-      }
+      // }
 
       await context.close();
     }));
@@ -2186,25 +2205,27 @@ async function cronJobToCommentRecentPostsFromDbMultiBrowser() {
   }
 }
 
-function canCommentNow({
-  commentLimit = 10,
-  startHour = 8,
-  endHour = 20,
-  currentHour = new Date().getHours(),
-  commentsUsed = 0
-}) {
-  // Check if current time is within allowed window
-  if (currentHour < startHour || currentHour >= endHour) {
-    return false;
+function isEligibleToComment(lastScrapedAt, keywordLimit) {
+  const now = new Date();
+  const today9AM = new Date(now);
+  today9AM.setHours(9, 0, 0, 0);
+
+  const today6PM = new Date(now);
+  today6PM.setHours(18, 0, 0, 0);
+
+  if (now < today9AM || now > today6PM) {
+    return false; // outside allowed time window
   }
 
-  const elapsedHours = currentHour - startHour + 1;
-  const totalHours = endHour - startHour;
+  const totalIntervalMs = today6PM - today9AM;
+  const intervalPerComment = totalIntervalMs / keywordLimit;
 
-  // Calculate allowed comments by this time
-  const allowedCommentsSoFar = Math.floor((commentLimit / totalHours) * elapsedHours);
+  const intervalsSinceStart = Math.floor((now - today9AM) / intervalPerComment);
 
-  return commentsUsed < allowedCommentsSoFar;
+  const lastScrape = new Date(lastScrapedAt);
+  const intervalsSinceLastScrape = Math.floor((lastScrape - today9AM) / intervalPerComment);
+
+  return intervalsSinceStart > intervalsSinceLastScrape;
 }
 
 
@@ -2242,9 +2263,13 @@ async function cronJobToKeywordPostsFromDbMultiBrowser() {
 
         const { commentLimit, keywordLimit } = package || {};
 
-        const canComment = canCommentNow({ commentLimit, commentsUsed: keywordLimit });
-        if (!canComment) {
-          console.log("You cannot comment right now.");
+        const keywordTag = await Keyword.findOne({ linkedAccountId, status: "active" })
+
+        const lastScrapedAt = keywordTag?.lastScrapedAt;
+
+        if (!isEligibleToComment(lastScrapedAt, keywordLimit)) {
+          console.log(`⏳ Waiting for next interval. Last scrape: ${lastScrapedAt}`);
+          return;
         }
 
         const cookies = JSON.parse(linkedAccount?.cookie);
@@ -2271,7 +2296,7 @@ async function cronJobToKeywordPostsFromDbMultiBrowser() {
           page = await context.newPage();
         }
         // await page.setUserAgent(userAgent);
-        page.setDefaultTimeout(60000); // changes default for all waits
+        // page.setDefaultTimeout(60000); // changes default for all waits
 
         // --- Stealth Injection ---
         await context.addInitScript(() => {
@@ -2355,7 +2380,6 @@ async function cronJobToKeywordPostsFromDbMultiBrowser() {
 
 
         try {
-          const keywordTag = await Keyword.findOne({ linkedAccountId, status: "active" })
 
           if (!keywordTag.keyword || keywordTag.keyword.length === 0) {
             return
@@ -2417,6 +2441,12 @@ async function cronJobToKeywordPostsFromDbMultiBrowser() {
 
           console.log("📄 PostData:", postData);
           console.log("👤 Author:", postAuthor);
+
+          // const isDisabled = await page.$eval(commentButton, el => el.hasAttribute('disabled'));
+          // if (isDisabled) {
+          //   console.log('🚫 Comment button is disabled.');
+          //   await context.close();
+          // }
 
           // Load comment settings and tone
           const commentSetting = await CommentSetting.findOne({ linkedAccountId, keywordid: '0' })
@@ -2498,7 +2528,6 @@ async function cronJobToKeywordPostsFromDbMultiBrowser() {
             await page.type(commentBox, commentText);
             await page.waitForSelector(commentButton, { state: 'visible' });
             await page.click(commentButton);
-            return;
           } else {
             // 🔹 Try to detect and mention author in the comment
             const mentionRegex = /@(?:[A-Za-z0-9.\-]+(?:\s+[A-Za-z0-9.\-]+){0,9})/;
