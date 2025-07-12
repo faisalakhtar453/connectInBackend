@@ -13,7 +13,6 @@ const Creator = require("../models/Creator");
 const { capitalizeName } = require("../helpers/functions");
 const Keyword = require("../models/Keyword");
 const CommentDetail = require("../models/CommentDetail");
-const OpenAI = require("openai");
 const Package = require("../models/Package");
 const UserGeneralDetail = require("../models/UserGeneralDetail");
 const Setting = require("../models/Setting");
@@ -21,28 +20,19 @@ const LinkedAccount = require("../models/LinkedAccount");
 const PackageDetail = require("../models/PackageDetail");
 const LinkedAccountTone = require("../models/LinkedAccountTone");
 const axios = require("axios");
-const puppeteer = require("puppeteer");
-const { executablePath } = require('puppeteer');
-// const puppeteer = require("puppeteer-extra");
-// const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-// puppeteer.use(StealthPlugin());
 const { GoogleGenAI } = require("@google/genai");
 const { chromium } = require('playwright');
 const { saveHar } = require('playwright-har');
 const path = require('path');
 const fs = require('fs');
+const moment = require('moment-timezone');
 
 const cron = require('node-cron');
 
 const jwtSecretKey = process.env.JWT_SECRET;
 const encryptionKey = process.env.KEY;
-const openApiKey = process.env.OPENAI_API_KEY;
 
 const ai = new GoogleGenAI({});
-
-const openai = new OpenAI({
-  apiKey: openApiKey,
-});
 
 router.post("/hi", async (req, res) => {
   const postData = req.body;
@@ -1776,6 +1766,8 @@ router.post('/linked-account-tone-one-time', async (req, res) => {
 cron.schedule('* * * * *', async () => {
   console.log('Running cron job every 1 min');
   // await cronJobToGetRecentPostsMultiTab();
+}, {
+  timezone: "Asia/Karachi"
 });
 
 
@@ -1788,7 +1780,7 @@ async function cronJobToGetRecentPostsMultiTab() {
 
     for (const user of users) {
       const userid = user._id.toString();
-      const linkedAccounts = await LinkedAccount.find({ userid, status: "active", cookieStatus:true }).lean()
+      const linkedAccounts = await LinkedAccount.find({ userid, status: "active", cookieStatus: true }).lean()
 
       // console.log("🚀 ~ cronJobToGetRecentPostsMultiTab ~ linkedAccounts:", linkedAccounts.length)
 
@@ -1858,13 +1850,14 @@ async function scrapeRecentPost({ creator, userid, linkedAccountId }) {
       console.log(`🆕 Saving new post for creator ${creatorid}`);
       await CommentDetail.create({ userid, linkedAccountId, creatorid, postUrl, status: 'pending' });
 
-      // Update creator's lastScrapedAt individually
-      await Creator.updateOne({ _id: creatorid }, { $set: { lastScrapedAt: new Date().toISOString() } });
 
       await delay(2000);
     } else {
       console.log(`✅ Post already processed for creator ${creatorid}`);
     }
+
+    // Update creator's lastScrapedAt individually
+    await Creator.updateOne({ _id: creatorid }, { $set: { lastScrapedAt: new Date().toISOString() } });
   } catch (err) {
     console.error(`❌ Error processing creator ${creator._id}:`, err.message);
   } finally {
@@ -1877,6 +1870,8 @@ cron.schedule('* * * * *', async () => {
   console.log('Running cron job during allowed hours');
   // await cronJobToCommentRecentPostsFromDbMultiBrowser();
   // await cronJobToKeywordPostsFromDbMultiBrowser()
+}, {
+  timezone: "Asia/Karachi"
 });
 
 async function cronJobToCommentRecentPostsFromDbMultiBrowser() {
@@ -2030,408 +2025,28 @@ async function cronJobToCommentRecentPostsFromDbMultiBrowser() {
       // for (const linkedGroup of userGroup) {
       //   for (const post of linkedGroup) {
       // Loop through all posts for this linkedAccountId
-        for (const post of posts) {
-          const { postUrl, creatorid } = post;
-          console.log(`📨 Navigating to: ${postUrl}`);
-
-          try {
-            // await delay(Math.floor(Math.random() * (15000 - 5000) + 5000));
-            await page.goto(postUrl, { waitUntil: 'load' });
-            await delay(2000);
-
-            //   const commentButton = 'button.comments-comment-box__submit-button--cr';
-            // const isDisabled = await page.$eval(commentButton, el => el.hasAttribute('disabled'));
-            // if (isDisabled) {
-            //   console.log('🚫 Comment button is disabled.');
-            //   await context.close();
-            // }
-
-            const postContentExists = await page.$("div.update-components-text.update-components-update-v2__commentary");
-            if (!postContentExists) {
-              await CommentDetail.updateOne({ postUrl }, {
-                $set: { comment: 'Post inaccessible or deleted', status: 'commented' }
-              });
-              continue;
-            }
-
-            const { postData, postAuthor } = await page.evaluate(() => ({
-              postData: document.querySelector("div.update-components-text.update-components-update-v2__commentary")?.textContent.trim() || "No post found",
-              postAuthor: document.querySelector(".update-components-actor__title span[aria-hidden='true']")?.textContent.trim() || "Author not found",
-            }));
-
-            // console.log("📄 PostData:", postData);
-            // console.log("👤 Author:", postAuthor);
-
-            // Load comment settings and tone
-            const commentSetting = await CommentSetting.findOne({ creatorid, linkedAccountId }) ??
-              await CommentSetting.findOne({ creatorid: "0", linkedAccountId });
-
-            // const tone = await LinkedAccountTone.findOne({ linkedAccountId });
-
-            const enabledCommentSettings = ["emoji", "hashtag", "exclamation", "author"]
-              .filter(s => commentSetting?.[s]);
-
-            const linkedAccountTone = await LinkedAccountTone.findOne({ linkedAccountId });
-            const { commentsLength, formalityLevel, personality, questionsFrequency, tone, gender } = linkedAccountTone || {};
-
-            const settingRules = {
-              emoji: "Turn on emojis and use 1 or 2.",
-              hashtag: "Turn on hashtags and use 1 or 2.",
-              exclamation: "Use exclamation marks where necessary.",
-              author: "Tag the post author.",
-            };
-
-            const toneRules = {
-              commentsLength: commentsLength && `Keep comments about ${commentsLength} characters long.`,
-              formalityLevel: formalityLevel && `Use a ${formalityLevel} tone.`,
-              personality: personality && `Reflect a ${personality} personality.`,
-              questionsFrequency: questionsFrequency && `Include questions with a frequency of ${questionsFrequency}.`,
-              tone: tone && `Use a ${tone} tone.`,
-              gender: gender && `Consider me as a ${gender}.`
-            };
-
-            let rules = "Write a human-like comment and follow the rules below:\n Keep under 200 characters";
-
-            let index = 1;
-            enabledCommentSettings.forEach(setting => {
-              if (settingRules[setting]) {
-                rules += `\n${index++}. ${settingRules[setting]}`;
-              }
-            });
-            Object.values(toneRules).forEach(rule => {
-              if (rule) {
-                rules += `\n${index++}. ${rule}`;
-              }
-            });
-
-            rules +=
-              `\nsome examples of real humans comment below
-
-
-              "I would like to see what you "bro-ing out" on us would look like. 
-              -------
-              I do wonder if teleportation will ever be a thing.
-              Morning sprint + Posting spring + Evening sprint.
-              -------
-              3 times I log in daily. And it's more than enough!
-              "You can’t outgrow the limits of your own self-perception"
-              -------
-              OK, WOW. 🔥
-              ...
-              Post Author = "${postAuthor}"
-              Post Content
-              "${postData}"
-              `;
-
-            console.log("rules:", rules);
-
-            const response = await ai.models.generateContent({
-              model: "gemini-2.5-flash",
-              contents: rules,
-            });
-
-            const commentText = response?.text
-            console.log("🚀 ~ jobs ~ commentText:", commentText)
-
-            const commentBox = 'div.ql-editor[contenteditable="true"]';
-            const commentButton = 'button.comments-comment-box__submit-button--cr';
-
-            const shouldMentionAuthor = enabledCommentSettings.includes('author');
-
-            if (!shouldMentionAuthor) {
-              // 🔹 Post simple comment without mention
-              await page.waitForSelector(commentBox, { state: 'visible' });
-              await page.click(commentBox);
-              await page.type(commentBox, commentText);
-              await page.waitForSelector(commentButton, { state: 'visible' });
-              await page.click(commentButton);
-            } else {
-              // 🔹 Try to detect and mention author in the comment
-              const mentionRegex = /@(?:[A-Za-z0-9.\-]+(?:\s+[A-Za-z0-9.\-]+){0,9})/;
-              const mentionMatch = commentText.match(mentionRegex);
-              let beforeMention = commentText;
-              let mentionTrigger = "";
-              let afterMention = "";
-              if (mentionMatch) {
-                const fullMention = mentionMatch[0]; // e.g., "@Ravi Kumar"
-                const mentionIndex = commentText.indexOf(fullMention);
-
-                beforeMention = commentText.slice(0, mentionIndex);
-                mentionTrigger = fullMention; // use full name trigger
-                afterMention = commentText.slice(mentionIndex + fullMention.length);
-              }
-              // 1. Focus the comment box
-              await page.waitForSelector(commentBox, { state: 'visible' });
-              const commentBoxHandle = await page.$(commentBox);
-              await commentBoxHandle.click();
-              // 2. Type only up to @mention
-              await page.keyboard.type(beforeMention);
-              // 3. Type the full @mention (e.g., @Ravi Kumar)
-              await page.keyboard.type(mentionTrigger);
-              // 4. Wait for LinkedIn dropdown
-              await page.waitForTimeout(1500);
-              // 5. Move mouse to dropdown suggestion and click
-              const box = await commentBoxHandle.boundingBox();
-              if (box) {
-                const x = box.x + box.width / 2;
-                const y = box.y + box.height + 25; // slightly lower for dropdown
-                await page.mouse.move(x, y);
-                await page.mouse.click(x, y);
-                await page.waitForTimeout(500); // wait for mention to be inserted
-              }
-              // 6. Type the rest of the comment
-              await page.keyboard.type(afterMention);
-              // 7. Click comment button
-              await page.waitForSelector(commentButton, { state: 'visible' });
-              await page.click(commentButton);
-              console.log("✅ Comment posted with full name mention.");
-            }
-            console.log("✅ Comment posted");
-            await CommentDetail.updateOne({ postUrl }, { $set: { comment: commentText, status: 'commented' } });
-
-            await delay(3000);
-          } catch (e) {
-            console.error("❌ Error on post:", postUrl, e.message);
-          }
-        }
-      // }
-
-      await context.close();
-    }));
-
-    await Promise.all(jobs);
-  } catch (err) {
-    console.error("❌ Error in cron job:", err);
-  }
-}
-
-function isEligibleToComment(lastScrapedAt, keywordLimit) {
-  const now = new Date();
-  const today9AM = new Date(now);
-  today9AM.setHours(9, 0, 0, 0);
-
-  const today6PM = new Date(now);
-  today6PM.setHours(18, 0, 0, 0);
-
-  if (now < today9AM || now > today6PM) {
-    return false; // outside allowed time window
-  }
-
-  const totalIntervalMs = today6PM - today9AM;
-  const intervalPerComment = totalIntervalMs / keywordLimit;
-
-  const intervalsSinceStart = Math.floor((now - today9AM) / intervalPerComment);
-
-  const lastScrape = new Date(lastScrapedAt);
-  const intervalsSinceLastScrape = Math.floor((lastScrape - today9AM) / intervalPerComment);
-
-  return intervalsSinceStart > intervalsSinceLastScrape;
-}
-
-
-async function cronJobToKeywordPostsFromDbMultiBrowser() {
-  try {
-    const pLimit = (await import('p-limit')).default;
-    const limit = pLimit(3); // max 3 tabs at once
-
-    let linkedAccounts = await LinkedAccount.find({ status: "active", cookieStatus:true }).lean()
-
-    for (let i = linkedAccounts.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [linkedAccounts[i], linkedAccounts[j]] = [linkedAccounts[j], linkedAccounts[i]];
-    }
-
-    const jobs = [];
-
-    for (const linkedAccount of linkedAccounts) {
-      jobs.push(limit(async () => {
-        const linkedAccountId = linkedAccount?._id;
-        const userid = linkedAccount?.userid
-        const user = await User.findById(userid);
-        const packageid = user?.packageid
-        const package = await Package.findOne({ _id: packageid })
-        const packageDetail = await PackageDetail.findOne({ toPlanId: packageid, userid })
-        const expDate = packageDetail?.expireDate
-
-        const expireDate = new Date(expDate);
-        const now = new Date();
-        const isExpired = expireDate < now;
-
-        if (isExpired == true) {
-          return
-        }
-
-        const { commentLimit, keywordLimit } = package || {};
-
-        const keywordTag = await Keyword.findOne({ linkedAccountId, status: "active" })
-
-        const lastScrapedAt = keywordTag?.lastScrapedAt;
-
-        if (!isEligibleToComment(lastScrapedAt, keywordLimit)) {
-          console.log(`⏳ Waiting for next interval. Last scrape: ${lastScrapedAt}`);
-          return;
-        }
-
-        const cookies = JSON.parse(linkedAccount?.cookie);
-        const userAgent = linkedAccount?.userAgent;
-
-        const userDir = path.resolve(__dirname, `../tmp/sessions-${linkedAccountId}`);
-        if (!fs.existsSync(userDir)) fs.mkdirSync(userDir, { recursive: true });
-
-        let context, page;
-        let headless = false;
-        let args = ['--start-maximized', '--no-sandbox', '--disable-setuid-sandbox'];
-
-        context = await chromium.launchPersistentContext(userDir, {
-          headless,
-          args,
-          userAgent,
-          viewport: null,
-          // proxy,
-        });
-
-        if (context.pages().length) {
-          page = context.pages()[0];
-        } else {
-          page = await context.newPage();
-        }
-        // await page.setUserAgent(userAgent);
-        // page.setDefaultTimeout(60000); // changes default for all waits
-
-        // --- Stealth Injection ---
-        await context.addInitScript(() => {
-          Object.defineProperty(navigator, 'webdriver', { get: () => false });
-          Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
-          Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-
-          // Battery spoof
-          navigator.getBattery = async () => ({
-            charging: true,
-            level: 1,
-            chargingTime: 0,
-            dischargingTime: Infinity
-          });
-
-          // Touch support
-          navigator.maxTouchPoints = 1;
-
-          const originalQuery = window.navigator.permissions.query;
-          window.navigator.permissions.query = (parameters) =>
-            parameters.name === 'notifications'
-              ? Promise.resolve({ state: Notification.permission })
-              : originalQuery(parameters);
-
-          const getParameter = WebGLRenderingContext.prototype.getParameter;
-          WebGLRenderingContext.prototype.getParameter = function (parameter) {
-            if (parameter === 37445) return "Intel Inc.";
-            if (parameter === 37446) return "Intel Iris OpenGL Engine";
-            return getParameter.call(this, parameter);
-          };
-
-          const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-          const copy = audioContext.createAnalyser;
-          audioContext.createAnalyser = function () {
-            const analyser = copy.call(this);
-            analyser.getFloatFrequencyData = function () { };
-            return analyser;
-          };
-        });
-
-
-        await page.goto('https://www.linkedin.com/feed/', { waitUntil: 'domcontentloaded' });
-
-        let isLoggedIn = await page.$('img.global-nav__me-photo');
-
-        if (!isLoggedIn) {
-          console.log(`🔐 Not logged in yet, trying cookie for ${user.email}`);
-
-          const sanitizedCookies = cookies
-            .filter(cookie => cookie.name && cookie.value && cookie.domain)
-            .map(cookie => ({
-              name: cookie.name,
-              value: cookie.value,
-              domain: cookie.domain,
-              path: cookie.path || '/',
-              secure: cookie.secure !== undefined ? cookie.secure : true,
-              httpOnly: cookie.httpOnly !== undefined ? cookie.httpOnly : true,
-              expires: typeof cookie.expirationDate === 'number' ? cookie.expirationDate : undefined
-            }));
-
-          if (!sanitizedCookies.length) {
-            throw new Error("No valid cookies found");
-          }
-
-          await context.clearCookies(); // prevent old login conflicts
-          await context.addCookies(sanitizedCookies);
-
-          await page.goto('https://www.linkedin.com/feed/', { waitUntil: 'domcontentloaded' });
-          await page.waitForTimeout(2000);
-          isLoggedIn = await page.$('img.global-nav__me-photo');
-        }
-
-        if (!isLoggedIn) {
-          console.log(`❌ Cookie failed for ${user.email}`);
-          await LinkedAccount.findByIdAndUpdate(linkedAccountId, { cookieStatus: false });
-          await context.close();
-          return;
-        }
-
-        console.log(`✅ Logged in as ${user.email} using cookie`);
-
+      for (const post of posts) {
+        const { postUrl, creatorid } = post;
+        console.log(`📨 Navigating to: ${postUrl}`);
 
         try {
-
-          if (!keywordTag.keyword || keywordTag.keyword.length === 0) {
-            return
-          }
-          // Split the first string in the array into separate keywords
-          const keywords = keywordTag.keyword[0].split(',');
-
-          // Pick a random keyword
-          let randomKeyword = keywords[Math.floor(Math.random() * keywords.length)];
-
-          console.log("Random Keyword:", randomKeyword);
-
-          // const inputSelector = 'input.search-global-typeahead__input';
-          // const commentBoxSelector = 'div.ql-editor[contenteditable="true"]';
-          // const commentButtonSelector = 'button.comments-comment-box__submit-button--cr';
-
-          const encodedKeyword = encodeURIComponent(randomKeyword);
-          const keywordUrl = `https://www.linkedin.com/search/results/content/?datePosted=%22past-24h%22&keywords=${encodedKeyword}&origin=FACETED_SEARCH&sortBy=%22relevance%22`;
-
-          await page.goto(keywordUrl, { waitUntil: 'networkidle' });
-
-          // Wait for posts to load
-          await page.waitForSelector('main', { visible: true });
-          await page.waitForSelector('ul[role="list"] li.artdeco-card', { visible: true });
-
-          const urns = await page.$$eval('ul[role="list"] li', listItems =>
-            listItems.map(li => {
-              const el = li.querySelector('[data-urn]');
-              return el?.getAttribute('data-urn') || null;
-            }).filter(Boolean)
-          );
-
-          console.log('Scoped URNs:', urns[0]);
-
-          const postUrl = `https://www.linkedin.com/feed/update/${urns[0]}`
-          console.log("postUrl", postUrl)
-
-          const isPostUrlDone = await CommentDetail.findOne({ postUrl })
-          if (isPostUrlDone) {
-            console.log("Comment Already done")
-            return
-          }
-
+          // await delay(Math.floor(Math.random() * (15000 - 5000) + 5000));
           await page.goto(postUrl, { waitUntil: 'load' });
           await delay(2000);
+
+          //   const commentButton = 'button.comments-comment-box__submit-button--cr';
+          // const isDisabled = await page.$eval(commentButton, el => el.hasAttribute('disabled'));
+          // if (isDisabled) {
+          //   console.log('🚫 Comment button is disabled.');
+          //   await context.close();
+          // }
 
           const postContentExists = await page.$("div.update-components-text.update-components-update-v2__commentary");
           if (!postContentExists) {
             await CommentDetail.updateOne({ postUrl }, {
               $set: { comment: 'Post inaccessible or deleted', status: 'commented' }
             });
-            return;
+            continue;
           }
 
           const { postData, postAuthor } = await page.evaluate(() => ({
@@ -2439,17 +2054,14 @@ async function cronJobToKeywordPostsFromDbMultiBrowser() {
             postAuthor: document.querySelector(".update-components-actor__title span[aria-hidden='true']")?.textContent.trim() || "Author not found",
           }));
 
-          console.log("📄 PostData:", postData);
-          console.log("👤 Author:", postAuthor);
-
-          // const isDisabled = await page.$eval(commentButton, el => el.hasAttribute('disabled'));
-          // if (isDisabled) {
-          //   console.log('🚫 Comment button is disabled.');
-          //   await context.close();
-          // }
+          // console.log("📄 PostData:", postData);
+          // console.log("👤 Author:", postAuthor);
 
           // Load comment settings and tone
-          const commentSetting = await CommentSetting.findOne({ linkedAccountId, keywordid: '0' })
+          const commentSetting = await CommentSetting.findOne({ creatorid, linkedAccountId }) ??
+            await CommentSetting.findOne({ creatorid: "0", linkedAccountId });
+
+          // const tone = await LinkedAccountTone.findOne({ linkedAccountId });
 
           const enabledCommentSettings = ["emoji", "hashtag", "exclamation", "author"]
             .filter(s => commentSetting?.[s]);
@@ -2570,16 +2182,407 @@ async function cronJobToKeywordPostsFromDbMultiBrowser() {
             console.log("✅ Comment posted with full name mention.");
           }
           console.log("✅ Comment posted");
-          // await CommentDetail.updateOne({ postUrl }, { $set: { comment: commentText, status: 'commented' } });
-          await CommentDetail.create({ userid, postUrl, comment: commentText, status: 'commented', keywordid: keywordTag?._id });
-          await Keyword.updateOne({ _id: keywordTag?._id }, { $set: { lastScrapedAt: new Date().toISOString() } });
+          await CommentDetail.updateOne({ postUrl }, { $set: { comment: commentText, status: 'commented' } });
 
           await delay(3000);
         } catch (e) {
-          console.error("❌ Error on post:", e);
+          console.error("❌ Error on post:", postUrl, e.message);
         }
+      }
+      // }
 
-        await context.close();
+      await context.close();
+    }));
+
+    await Promise.all(jobs);
+  } catch (err) {
+    console.error("❌ Error in cron job:", err);
+  }
+}
+
+function isEligibleToComment(lastScrapedAt, keywordLimit) {
+  const now = new Date();
+  const today9AM = new Date(now);
+  today9AM.setHours(9, 0, 0, 0);
+
+  const today6PM = new Date(now);
+  today6PM.setHours(18, 0, 0, 0);
+
+  if (now < today9AM || now > today6PM) {
+    return false; // outside allowed time window
+  }
+
+  const totalIntervalMs = today6PM - today9AM;
+  const intervalPerComment = totalIntervalMs / keywordLimit;
+
+  const intervalsSinceStart = Math.floor((now - today9AM) / intervalPerComment);
+
+  const lastScrape = new Date(lastScrapedAt);
+  const intervalsSinceLastScrape = Math.floor((lastScrape - today9AM) / intervalPerComment);
+
+  return intervalsSinceStart > intervalsSinceLastScrape;
+}
+
+
+async function cronJobToKeywordPostsFromDbMultiBrowser() {
+  try {
+    const pLimit = (await import('p-limit')).default;
+    const limit = pLimit(3); // max 3 tabs at once
+
+    let linkedAccounts = await LinkedAccount.find({ status: "active", cookieStatus: true }).lean()
+
+    for (let i = linkedAccounts.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [linkedAccounts[i], linkedAccounts[j]] = [linkedAccounts[j], linkedAccounts[i]];
+    }
+
+    const jobs = [];
+
+    for (const linkedAccount of linkedAccounts) {
+      jobs.push(limit(async () => {
+        let context;
+        try {
+          const linkedAccountId = linkedAccount?._id;
+          const userid = linkedAccount?.userid
+          const user = await User.findById(userid);
+          const packageid = user?.packageid
+          const package = await Package.findOne({ _id: packageid })
+          const packageDetail = await PackageDetail.findOne({ toPlanId: packageid, userid })
+          const expDate = packageDetail?.expireDate
+
+          const expireDate = new Date(expDate);
+          const now = new Date();
+          const isExpired = expireDate < now;
+
+          if (isExpired == true) {
+            return
+          }
+
+          const { commentLimit, keywordLimit } = package || {};
+
+          const keywordTag = await Keyword.findOne({ linkedAccountId, status: "active" })
+
+          const lastScrapedAt = keywordTag?.lastScrapedAt;
+
+          if (!isEligibleToComment(lastScrapedAt, keywordLimit)) {
+            console.log(`⏳ Waiting for next interval. Last scrape: ${lastScrapedAt}`);
+            return;
+          }
+
+          const cookies = JSON.parse(linkedAccount?.cookie);
+          const userAgent = linkedAccount?.userAgent;
+
+          const userDir = path.resolve(__dirname, `../tmp/sessions-${linkedAccountId}`);
+          if (!fs.existsSync(userDir)) fs.mkdirSync(userDir, { recursive: true });
+
+          let page;
+          let headless = false;
+          let args = ['--start-maximized', '--no-sandbox', '--disable-setuid-sandbox'];
+
+          context = await chromium.launchPersistentContext(userDir, {
+            headless,
+            args,
+            userAgent,
+            viewport: null,
+            // proxy,
+          });
+
+          if (context.pages().length) {
+            page = context.pages()[0];
+          } else {
+            page = await context.newPage();
+          }
+          // await page.setUserAgent(userAgent);
+          // page.setDefaultTimeout(60000); // changes default for all waits
+
+          // --- Stealth Injection ---
+          await context.addInitScript(() => {
+            Object.defineProperty(navigator, 'webdriver', { get: () => false });
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+
+            // Battery spoof
+            navigator.getBattery = async () => ({
+              charging: true,
+              level: 1,
+              chargingTime: 0,
+              dischargingTime: Infinity
+            });
+
+            // Touch support
+            navigator.maxTouchPoints = 1;
+
+            const originalQuery = window.navigator.permissions.query;
+            window.navigator.permissions.query = (parameters) =>
+              parameters.name === 'notifications'
+                ? Promise.resolve({ state: Notification.permission })
+                : originalQuery(parameters);
+
+            const getParameter = WebGLRenderingContext.prototype.getParameter;
+            WebGLRenderingContext.prototype.getParameter = function (parameter) {
+              if (parameter === 37445) return "Intel Inc.";
+              if (parameter === 37446) return "Intel Iris OpenGL Engine";
+              return getParameter.call(this, parameter);
+            };
+
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const copy = audioContext.createAnalyser;
+            audioContext.createAnalyser = function () {
+              const analyser = copy.call(this);
+              analyser.getFloatFrequencyData = function () { };
+              return analyser;
+            };
+          });
+
+
+          await page.goto('https://www.linkedin.com/feed/', { waitUntil: 'domcontentloaded' });
+
+          let isLoggedIn = await page.$('img.global-nav__me-photo');
+
+          if (!isLoggedIn) {
+            console.log(`🔐 Not logged in yet, trying cookie for ${user.email}`);
+
+            const sanitizedCookies = cookies
+              .filter(cookie => cookie.name && cookie.value && cookie.domain)
+              .map(cookie => ({
+                name: cookie.name,
+                value: cookie.value,
+                domain: cookie.domain,
+                path: cookie.path || '/',
+                secure: cookie.secure !== undefined ? cookie.secure : true,
+                httpOnly: cookie.httpOnly !== undefined ? cookie.httpOnly : true,
+                expires: typeof cookie.expirationDate === 'number' ? cookie.expirationDate : undefined
+              }));
+
+            if (!sanitizedCookies.length) {
+              throw new Error("No valid cookies found");
+            }
+
+            await context.clearCookies(); // prevent old login conflicts
+            await context.addCookies(sanitizedCookies);
+
+            await page.goto('https://www.linkedin.com/feed/', { waitUntil: 'domcontentloaded' });
+            await page.waitForTimeout(2000);
+            isLoggedIn = await page.$('img.global-nav__me-photo');
+          }
+
+          if (!isLoggedIn) {
+            console.log(`❌ Cookie failed for ${user.email}`);
+            await LinkedAccount.findByIdAndUpdate(linkedAccountId, { cookieStatus: false });
+            await context.close();
+            return;
+          }
+
+          console.log(`✅ Logged in as ${user.email} using cookie`);
+
+
+          try {
+
+            if (!keywordTag.keyword || keywordTag.keyword.length === 0) {
+              return
+            }
+            // Split the first string in the array into separate keywords
+            const keywords = keywordTag.keyword[0].split(',');
+
+            // Pick a random keyword
+            let randomKeyword = keywords[Math.floor(Math.random() * keywords.length)];
+
+            console.log("Random Keyword:", randomKeyword);
+
+            // const inputSelector = 'input.search-global-typeahead__input';
+            // const commentBoxSelector = 'div.ql-editor[contenteditable="true"]';
+            // const commentButtonSelector = 'button.comments-comment-box__submit-button--cr';
+
+            const encodedKeyword = encodeURIComponent(randomKeyword);
+            const keywordUrl = `https://www.linkedin.com/search/results/content/?datePosted=%22past-24h%22&keywords=${encodedKeyword}&origin=FACETED_SEARCH&sortBy=%22relevance%22`;
+
+            await page.goto(keywordUrl, { waitUntil: 'networkidle' });
+
+            // Wait for posts to load
+            await page.waitForSelector('main', { visible: true });
+            await page.waitForSelector('ul[role="list"] li.artdeco-card', { visible: true });
+
+            const urns = await page.$$eval('ul[role="list"] li', listItems =>
+              listItems.map(li => {
+                const el = li.querySelector('[data-urn]');
+                return el?.getAttribute('data-urn') || null;
+              }).filter(Boolean)
+            );
+
+            console.log('Scoped URNs:', urns[0]);
+
+            const postUrl = `https://www.linkedin.com/feed/update/${urns[0]}`
+            console.log("postUrl", postUrl)
+
+            const isPostUrlDone = await CommentDetail.findOne({ postUrl })
+            if (isPostUrlDone) {
+              console.log("Comment Already done")
+              return
+            }
+
+            await page.goto(postUrl, { waitUntil: 'load' });
+            await delay(2000);
+
+            const postContentExists = await page.$("div.update-components-text.update-components-update-v2__commentary");
+            if (!postContentExists) {
+              await CommentDetail.updateOne({ postUrl }, {
+                $set: { comment: 'Post inaccessible or deleted', status: 'commented' }
+              });
+              return;
+            }
+
+            const { postData, postAuthor } = await page.evaluate(() => ({
+              postData: document.querySelector("div.update-components-text.update-components-update-v2__commentary")?.textContent.trim() || "No post found",
+              postAuthor: document.querySelector(".update-components-actor__title span[aria-hidden='true']")?.textContent.trim() || "Author not found",
+            }));
+
+            console.log("📄 PostData:", postData);
+            console.log("👤 Author:", postAuthor);
+
+            // const isDisabled = await page.$eval(commentButton, el => el.hasAttribute('disabled'));
+            // if (isDisabled) {
+            //   console.log('🚫 Comment button is disabled.');
+            //   await context.close();
+            // }
+
+            // Load comment settings and tone
+            const commentSetting = await CommentSetting.findOne({ linkedAccountId, keywordid: '0' })
+
+            const enabledCommentSettings = ["emoji", "hashtag", "exclamation", "author"]
+              .filter(s => commentSetting?.[s]);
+
+            const linkedAccountTone = await LinkedAccountTone.findOne({ linkedAccountId });
+            const { commentsLength, formalityLevel, personality, questionsFrequency, tone, gender } = linkedAccountTone || {};
+
+            const settingRules = {
+              emoji: "Turn on emojis and use 1 or 2.",
+              hashtag: "Turn on hashtags and use 1 or 2.",
+              exclamation: "Use exclamation marks where necessary.",
+              author: "Tag the post author.",
+            };
+
+            const toneRules = {
+              commentsLength: commentsLength && `Keep comments about ${commentsLength} characters long.`,
+              formalityLevel: formalityLevel && `Use a ${formalityLevel} tone.`,
+              personality: personality && `Reflect a ${personality} personality.`,
+              questionsFrequency: questionsFrequency && `Include questions with a frequency of ${questionsFrequency}.`,
+              tone: tone && `Use a ${tone} tone.`,
+              gender: gender && `Consider me as a ${gender}.`
+            };
+
+            let rules = "Write a human-like comment and follow the rules below:\n Keep under 200 characters";
+
+            let index = 1;
+            enabledCommentSettings.forEach(setting => {
+              if (settingRules[setting]) {
+                rules += `\n${index++}. ${settingRules[setting]}`;
+              }
+            });
+            Object.values(toneRules).forEach(rule => {
+              if (rule) {
+                rules += `\n${index++}. ${rule}`;
+              }
+            });
+
+            rules +=
+              `\nsome examples of real humans comment below
+
+
+              "I would like to see what you "bro-ing out" on us would look like. 
+              -------
+              I do wonder if teleportation will ever be a thing.
+              Morning sprint + Posting spring + Evening sprint.
+              -------
+              3 times I log in daily. And it's more than enough!
+              "You can’t outgrow the limits of your own self-perception"
+              -------
+              OK, WOW. 🔥
+              ...
+              Post Author = "${postAuthor}"
+              Post Content
+              "${postData}"
+              `;
+
+            console.log("rules:", rules);
+
+            const response = await ai.models.generateContent({
+              model: "gemini-2.5-flash",
+              contents: rules,
+            });
+
+            const commentText = response?.text
+            console.log("🚀 ~ jobs ~ commentText:", commentText)
+
+            const commentBox = 'div.ql-editor[contenteditable="true"]';
+            const commentButton = 'button.comments-comment-box__submit-button--cr';
+
+            const shouldMentionAuthor = enabledCommentSettings.includes('author');
+
+            if (!shouldMentionAuthor) {
+              // 🔹 Post simple comment without mention
+              await page.waitForSelector(commentBox, { state: 'visible' });
+              await page.click(commentBox);
+              await page.type(commentBox, commentText);
+              await page.waitForSelector(commentButton, { state: 'visible' });
+              await page.click(commentButton);
+            } else {
+              // 🔹 Try to detect and mention author in the comment
+              const mentionRegex = /@(?:[A-Za-z0-9.\-]+(?:\s+[A-Za-z0-9.\-]+){0,9})/;
+              const mentionMatch = commentText.match(mentionRegex);
+              let beforeMention = commentText;
+              let mentionTrigger = "";
+              let afterMention = "";
+              if (mentionMatch) {
+                const fullMention = mentionMatch[0]; // e.g., "@Ravi Kumar"
+                const mentionIndex = commentText.indexOf(fullMention);
+
+                beforeMention = commentText.slice(0, mentionIndex);
+                mentionTrigger = fullMention; // use full name trigger
+                afterMention = commentText.slice(mentionIndex + fullMention.length);
+              }
+              // 1. Focus the comment box
+              await page.waitForSelector(commentBox, { state: 'visible' });
+              const commentBoxHandle = await page.$(commentBox);
+              await commentBoxHandle.click();
+              // 2. Type only up to @mention
+              await page.keyboard.type(beforeMention);
+              // 3. Type the full @mention (e.g., @Ravi Kumar)
+              await page.keyboard.type(mentionTrigger);
+              // 4. Wait for LinkedIn dropdown
+              await page.waitForTimeout(1500);
+              // 5. Move mouse to dropdown suggestion and click
+              const box = await commentBoxHandle.boundingBox();
+              if (box) {
+                const x = box.x + box.width / 2;
+                const y = box.y + box.height + 25; // slightly lower for dropdown
+                await page.mouse.move(x, y);
+                await page.mouse.click(x, y);
+                await page.waitForTimeout(500); // wait for mention to be inserted
+              }
+              // 6. Type the rest of the comment
+              await page.keyboard.type(afterMention);
+              // 7. Click comment button
+              await page.waitForSelector(commentButton, { state: 'visible' });
+              await page.click(commentButton);
+              console.log("✅ Comment posted with full name mention.");
+            }
+            console.log("✅ Comment posted");
+            // await CommentDetail.updateOne({ postUrl }, { $set: { comment: commentText, status: 'commented' } });
+            await CommentDetail.create({ userid, postUrl, comment: commentText, status: 'commented', keywordid: keywordTag?._id });
+            await Keyword.updateOne({ _id: keywordTag?._id }, { $set: { lastScrapedAt: new Date().toISOString() } });
+
+            await delay(3000);
+          } catch (e) {
+            console.error("❌ Error on post:", e);
+          }
+
+        } catch (err) {
+          console.error("Error in cron job limit:", err);
+        } finally {
+          if (context) {
+            await context.close();
+          }
+        }
       }));
     }
 
