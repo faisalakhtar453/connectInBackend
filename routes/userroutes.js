@@ -1788,7 +1788,7 @@ async function cronJobToGetRecentPostsMultiTab() {
 
     for (const user of users) {
       const userid = user._id.toString();
-      const linkedAccounts = await LinkedAccount.find({ userid, status: "active" }).lean()
+      const linkedAccounts = await LinkedAccount.find({ userid, status: "active", cookieStatus:true }).lean()
 
       // console.log("🚀 ~ cronJobToGetRecentPostsMultiTab ~ linkedAccounts:", linkedAccounts.length)
 
@@ -1899,7 +1899,7 @@ async function cronJobToCommentRecentPostsFromDbMultiBrowser() {
       const firstPost = posts[0];
       console.log("🚀 ~ jobs ~ firstPost:", firstPost)
       const user = await User.findById(firstPost.userid);
-      const linkedAccount = await LinkedAccount.findById(linkedAccountId);
+      const linkedAccount = await LinkedAccount.findOne({ _id: linkedAccountId, cookieStatus: true });
 
       const packageDetail = await PackageDetail.findOne({
         toPlanId: user.packageid,
@@ -2234,7 +2234,7 @@ async function cronJobToKeywordPostsFromDbMultiBrowser() {
     const pLimit = (await import('p-limit')).default;
     const limit = pLimit(3); // max 3 tabs at once
 
-    let linkedAccounts = await LinkedAccount.find({ status: "active" }).lean()
+    let linkedAccounts = await LinkedAccount.find({ status: "active", cookieStatus:true }).lean()
 
     for (let i = linkedAccounts.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
