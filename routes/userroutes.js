@@ -1408,9 +1408,10 @@ router.post("/keywordCommentDetail", async (req, res) => {
   try {
     const authUser = await checkAuthorization(req, res);
     if (authUser) {
-      const keyword = await Keyword.find({ userid: authUser })
-      const data = await CommentDetail.find({ userid: authUser, keywordid: keyword?._id });
-
+      const keywords = await Keyword.find({ userid: authUser })
+      const keywordIds = keywords?.map(k => k._id);
+      const data = await CommentDetail.find({ userid: authUser, keywordid: { $in: keywordIds } });
+      
       const enrichedData = await Promise.all(
         data.map(async (item) => {
           const [creator, linkedAccount] = await Promise.all([

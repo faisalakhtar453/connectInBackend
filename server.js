@@ -24,7 +24,7 @@ const allowedOrigins = [
   'http://localhost:3000',
   'https://connect-in-iota.vercel.app',
   'https://connect-68c9stb2h-faisals-projects-b859655a.vercel.app',
-  'https://86d346107484.ngrok-free.app', // ← your current ngrok frontend URL
+  'https://45770c216506.ngrok-free.app', // ← your current ngrok frontend URL
 ];
 
 app.use(cors({
