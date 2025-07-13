@@ -1402,26 +1402,20 @@ router.post("/singleUpdateCommentSettingKeyword", async (req, res) => {
 
 router.post("/keywordCommentDetail", async (req, res) => {
   const postData = req.body;
-  // const hear = CleanHTMLData(CleanDBData(postData.hear));
-  // const industry = CleanHTMLData(CleanDBData(postData.industry));
-  // const values = CleanHTMLData(CleanDBData(postData.values));
   try {
     const authUser = await checkAuthorization(req, res);
     if (authUser) {
       const keywords = await Keyword.find({ userid: authUser })
       const keywordIds = keywords?.map(k => k._id);
-      const data = await CommentDetail.find({ userid: authUser, keywordid: { $in: keywordIds } });
-      
+      const commentDetails = await CommentDetail.find({ userid: authUser, keywordid: { $in: keywordIds } });
+
+      // Enrich each comment detail with creator and linked account info
       const enrichedData = await Promise.all(
-        data.map(async (item) => {
-          const [creator, linkedAccount] = await Promise.all([
-            Creator.findById(item.creatorid).select("name"),
-            LinkedAccount.findById(item.linkedAccountId).select("name") // change 'name' if your field is different
-          ]);
+        commentDetails.map(async (item) => {
+          const [linkedAccount] = await Promise.all([LinkedAccount.findById(item.linkedAccountId).select("name")]);
 
           return {
             ...item._doc,
-            creatorName: creator?.name || "Unknown Creator",
             linkedAccountName: linkedAccount?.name || "Unknown Account"
           };
         })
@@ -1830,16 +1824,24 @@ async function scrapeRecentPost({ creator, userid, linkedAccountId }) {
     await page.goto(profileUrl, { waitUntil: "domcontentloaded" });
 
     await page.waitForSelector("div.feed-shared-update-list-carousel", { state: 'visible' });
+    const carousels = await page.$$('div.feed-shared-update-list-carousel');
+    for (const carousel of carousels) {
+      const ul = await carousel.$('ul');
+      if (!ul) continue;
 
-    await page.evaluate(() => {
-      document.querySelectorAll("div.feed-shared-update-list-carousel").forEach(feed => {
-        const ul = feed.querySelector("ul");
-        if (!ul) return;
+      const commentBtn = await ul.$('li button[aria-label="Comment"]');
+      if (!commentBtn) continue;
 
-        const commentBtn = ul.querySelector('li button[aria-label="Comment"]');
-        if (commentBtn) commentBtn.click();
-      });
-    });
+      const isDisabled = await commentBtn.isDisabled(); // ✅ this is correct
+      if (isDisabled) {
+        await Creator.updateOne({ _id: creatorid }, { $set: { lastScrapedAt: new Date().toISOString() } });
+
+        console.log(`⏭️ Skipping creator ${creatorid} due to disabled comment button.`);
+        return; // ✅ Exit early from scrapeRecentPost()
+      }
+
+      await commentBtn.click();
+    }
 
     await page.waitForSelector("main", { state: 'visible' });
     await page.waitForSelector("div.update-components-text.update-components-update-v2__commentary", { state: 'visible' });
@@ -2403,16 +2405,39 @@ async function cronJobToKeywordPostsFromDbMultiBrowser() {
             await page.waitForSelector('main', { visible: true });
             await page.waitForSelector('ul[role="list"] li.artdeco-card', { visible: true });
 
-            const urns = await page.$$eval('ul[role="list"] li', listItems =>
-              listItems.map(li => {
-                const el = li.querySelector('[data-urn]');
-                return el?.getAttribute('data-urn') || null;
-              }).filter(Boolean)
-            );
+            // Get all posts on the current page
+            const posts = await page.$$('ul[role="list"] li.artdeco-card');
 
-            console.log('Scoped URNs:', urns[0]);
+            let selectedUrn = null;
 
-            const postUrl = `https://www.linkedin.com/feed/update/${urns[0]}`
+            for (const post of posts) {
+              const urnEl = await post.$('[data-urn]');
+              if (!urnEl) continue;
+
+              const urn = await urnEl.getAttribute('data-urn');
+              const commentBtn = await post.$('button[aria-label="Comment"]');
+
+              if (!commentBtn) {
+                console.log(`❌ No comment button in post: ${urn}`);
+                continue;
+              }
+
+              const isDisabled = await commentBtn.isDisabled();
+              if (!isDisabled) {
+                selectedUrn = urn;
+                console.log(`✅ Found post with enabled comment: ${urn}`);
+                break;
+              } else {
+                console.log(`❌ Comment disabled for post: ${urn}`);
+              }
+            }
+
+            if (!selectedUrn) {
+              console.log("❌ No posts with enabled comment button found.");
+              return;
+            }
+
+            const postUrl = `https://www.linkedin.com/feed/update/${selectedUrn}`
             console.log("postUrl", postUrl)
 
             const isPostUrlDone = await CommentDetail.findOne({ postUrl })
@@ -2569,7 +2594,7 @@ async function cronJobToKeywordPostsFromDbMultiBrowser() {
             }
             console.log("✅ Comment posted");
             // await CommentDetail.updateOne({ postUrl }, { $set: { comment: commentText, status: 'commented' } });
-            await CommentDetail.create({ userid, postUrl, comment: commentText, status: 'commented', keywordid: keywordTag?._id });
+            await CommentDetail.create({ userid, postUrl, linkedAccountId, comment: commentText, status: 'commented', keywordid: keywordTag?._id });
             await Keyword.updateOne({ _id: keywordTag?._id }, { $set: { lastScrapedAt: new Date().toISOString() } });
 
             await delay(3000);
