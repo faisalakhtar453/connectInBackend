@@ -356,7 +356,7 @@ router.post("/userCommentDetail", async (req, res) => {
   try {
     const authUser = await checkAuthorization(req, res);
     if (authUser) {
-      const data = await CommentDetail.find({ userid: authUser });
+      const data = await CommentDetail.find({ userid: authUser, creatorid: { $exists: true } });
 
       const enrichedData = await Promise.all(
         data.map(async (item) => {
