@@ -356,7 +356,7 @@ router.post("/userCommentDetail", async (req, res) => {
   try {
     const authUser = await checkAuthorization(req, res);
     if (authUser) {
-      const data = await CommentDetail.find({ userid: authUser, creatorid: { $exists: true } });
+      const data = await CommentDetail.find({ userid: authUser, creatorid: { $exists: true } }).sort({ createdAt: -1 });
 
       const enrichedData = await Promise.all(
         data.map(async (item) => {
@@ -1407,7 +1407,7 @@ router.post("/keywordCommentDetail", async (req, res) => {
     if (authUser) {
       const keywords = await Keyword.find({ userid: authUser })
       const keywordIds = keywords?.map(k => k._id);
-      const commentDetails = await CommentDetail.find({ userid: authUser, keywordid: { $in: keywordIds } });
+      const commentDetails = await CommentDetail.find({ userid: authUser, keywordid: { $in: keywordIds } }).sort({ createdAt: -1 });
 
       // Enrich each comment detail with creator and linked account info
       const enrichedData = await Promise.all(
